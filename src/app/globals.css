@@ -1,26 +1,103 @@
+@import url('https://fonts.googleapis.com/css2?family=Google+Sans+Flex:wght@100..900&display=swap');
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --gos-font: 'Google Sans Flex', -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--gos-font);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+/* ============================================================
+   CONFIGURAZIONE GLOBALE DARK THEME & GOOGLE SANS FLEX
+   ============================================================ */
+
+html, body {
+  background-color: #050B14 !important;
+  color: #FFFFFF !important;
+  font-family: var(--gos-font) !important;
+  font-size: 14px;
+  min-height: 100vh;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  -webkit-font-smoothing: antialiased;
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* Struttura del layout principale */
+body > main {
+  flex: 1;
+  width: 100%;
+  max-width: 80rem;
+  margin-left: auto;
+  margin-right: auto;
+  padding: 2rem 1.5rem 3rem 1.5rem;
+}
+
+/* ============================================================
+   TIPOGRAFIA UNIFICATA A GOOGLE SANS FLEX (Inclusi numeri e valute)
+   ============================================================ */
+h1, h2, h3, h4, h5, h6, p, span, td, label, li, a, div {
+  font-family: var(--gos-font) !important;
+}
+
+/* Forzatura specifica per numeri, valute e classi mono (es. Fatturato) */
+main .font-mono, 
+main [class*="font-mono"],
+main .text-3xl,
+main .text-4xl,
+main span[class*="text-"] {
+  font-family: var(--gos-font) !important;
+}
+
+/* Testi principali e secondari */
+main h1, main h2, main h3, main h4, main h5, main h6, 
+main p, main span, main td, main label, main li {
+  color: #FFFFFF !important;
+}
+
+.text-gray-600, .text-gray-500, .text-gray-400, .text-slate-400 {
+  color: #94A3B8 !important;
+}
+
+/* ============================================================
+   GEOMETRIA E CARD (Dark Slate con bordi squadrati a 0px)
+   ============================================================ */
+div[class*="bg-white"],
+main .rounded-3xl,
+main .rounded-2xl,
+main .rounded-xl,
+main .rounded-lg,
+main div[class*="rounded"] {
+  background-color: #0F172A !important;
+  border-color: #1E293B !important;
+  border-radius: 0px !important;
+}
+
+/* Metriche e cifre verdi (es. Fatturato 2026) */
+.text-emerald-500, .text-emerald-400, .text-green-500, [class*="text-[#10B981]"], [class*="text-[#32CD32]"] {
+  color: #10B981 !important;
+}
+
+/* Pulsanti primari arancioni */
+button[class*="bg-orange"], a[class*="bg-orange"], button.bg-amber-600 {
+  background-color: #EA580C !important;
+  color: #FFFFFF !important;
+  border-radius: 0px !important;
+}
+
+/* Tabelle e intestazioni */
+th {
+  background-color: #0F172A !important;
+  color: #94A3B8 !important;
+  font-family: var(--gos-font) !important;
+  font-weight: 700 !important;
+  border-bottom: 1px solid #1E293B !important;
+  border-radius: 0px !important;
+}
+
+th * {
+  color: #94A3B8 !important;
+  font-family: var(--gos-font) !important;
 }
