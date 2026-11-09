@@ -190,9 +190,11 @@ function ProjectDetailContent({ params }: { params: Promise<{ id: string }> }) {
     }
   }, [projectId, companyIdFromUrl, supabase]);
 
-  // --- MOTORI DI CALCOLO QUINQUENNALI ---
+  // --- MOTORI DI CALCOLO QUINQUENNALI (CON TIPIZZAZIONE ESPLICITA DELLE TUPLE) ---
   const years: [number, number, number, number, number] = [0, 1, 2, 3, 4];
+  
   const totalRevenues = years.map(y => products.reduce((acc, p) => acc + (p.pieces[y] * p.prices[y]), 0)) as [number, number, number, number, number];
+  
   const totalCOGS = years.map(y => {
     const prodCost = products.reduce((acc, p) => acc + (p.pieces[y] * p.unitCosts[y]), 0);
     const genProd = generalProductionCosts.reduce((acc, c) => acc + c.amounts[y], 0);
@@ -200,10 +202,15 @@ function ProjectDetailContent({ params }: { params: Promise<{ id: string }> }) {
   }) as [number, number, number, number, number];
 
   const grossMargins = years.map(y => totalRevenues[y] - totalCOGS[y]) as [number, number, number, number, number];
+  
   const totalOpexPerYear = years.map(y => opexItems.reduce((acc, op) => acc + op.amounts[y], 0)) as [number, number, number, number, number];
+  
   const ebitdaPerYear = years.map(y => grossMargins[y] - totalOpexPerYear[y]) as [number, number, number, number, number];
+  
   const totalCapexPerYear = years.map(y => capexItems.reduce((acc, cx) => acc + cx.amounts[y], 0)) as [number, number, number, number, number];
+  
   const depreciationPerYear = years.map(y => totalCapexPerYear[y] * 0.20) as [number, number, number, number, number];
+  
   const ebitPerYear = years.map(y => ebitdaPerYear[y] - depreciationPerYear[y]) as [number, number, number, number, number];
 
   const totalInterestPerYear = years.map(yIdx => {
@@ -247,7 +254,7 @@ function ProjectDetailContent({ params }: { params: Promise<{ id: string }> }) {
 
   const pnlRows: PnLRowData[] = [
     { label: 'Total Revenue', values: totalRevenues, colorClass: 'text-emerald-400 font-bold' },
-    { label: 'Cost of Production (COGS)', values: totalCOGS.map(v => -v), isNegative: true, indent: true },
+    { label: 'Cost of Production (COGS)', values: totalCOGS.map(v => -v) as [number, number, number, number, number], isNegative: true, indent: true },
     { label: 'GROSS MARGIN', values: grossMargins, isSubtotal: true, colorClass: 'text-amber-400' },
     ...opexItems.map(op => ({
       label: `OPEX: ${op.label}`,
@@ -256,7 +263,7 @@ function ProjectDetailContent({ params }: { params: Promise<{ id: string }> }) {
       indent: true
     })),
     { label: 'EBITDA', values: ebitdaPerYear, isSubtotal: true, colorClass: 'text-amber-400' },
-    { label: 'Depreciation & Amortization', values: depreciationPerYear.map(v => -v), isNegative: true, indent: true },
+    { label: 'Depreciation & Amortization', values: depreciationPerYear.map(v => -v) as [number, number, number, number, number], isNegative: true, indent: true },
     { label: 'EBIT', values: ebitPerYear, isSubtotal: true, colorClass: 'text-amber-400' },
     { label: 'NET FINANCIAL ITEMS', values: netFinancialItemsPerYear, isSubtotal: true, colorClass: 'text-blue-400' },
     { label: 'EBT', values: ebtPerYear, isSubtotal: true, colorClass: 'text-blue-400' },
@@ -364,7 +371,6 @@ function ProjectDetailContent({ params }: { params: Promise<{ id: string }> }) {
     ? `/advisor/companies/${project.company_id}` 
     : `/advisor/companies`;
 
-  // Calcolo riepilogo task
   const taskSummary = {
     total: tasks.length,
     completed: tasks.filter(t => t.status === 'Completato').length,
@@ -442,7 +448,7 @@ function ProjectDetailContent({ params }: { params: Promise<{ id: string }> }) {
         </div>
       </div>
 
-      {/* TAB BAR PRINCIPALI */}
+      {/* TAB BAR PRINCIPALI (ALLINEATO A 'questionari') */}
       <div className="flex border-b border-gray-800 gap-8 overflow-x-auto">
         <button
           onClick={() => setActiveTab('questionari')}
@@ -506,7 +512,7 @@ function ProjectDetailContent({ params }: { params: Promise<{ id: string }> }) {
           </div>
         )}
 
-        {activeTab === 'questionnaires' && <div className="space-y-4"><h3 className="text-base font-bold text-white">Questionari & Assessment Aziendali</h3><p className="text-xs text-gray-400">Raccolta dati strategici.</p></div>}
+        {activeTab === 'questionari' && <div className="space-y-4"><h3 className="text-base font-bold text-white">Questionari & Assessment Aziendali</h3><p className="text-xs text-gray-400">Raccolta dati strategici.</p></div>}
         
         {/* --- CRONOPROGRAMMA & TASK --- */}
         {activeTab === 'cronoprogramma' && (
@@ -518,7 +524,6 @@ function ProjectDetailContent({ params }: { params: Promise<{ id: string }> }) {
 
             {message && <div className="p-3 bg-cyan-950/40 border border-cyan-800/60 rounded-xl text-cyan-300 text-xs">{message}</div>}
 
-            {/* Cruscotto Metriche */}
             <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
               <div className="bg-gray-950 border border-gray-800 p-4 rounded-xl text-center">
                 <span className="text-2xl font-black text-white">{taskSummary.total}</span>
@@ -538,7 +543,6 @@ function ProjectDetailContent({ params }: { params: Promise<{ id: string }> }) {
               </div>
             </div>
 
-            {/* Tabella Task Attivi */}
             <div className="space-y-4 bg-gray-950 p-6 rounded-xl border border-gray-800">
               <h3 className="text-sm font-bold text-cyan-400 uppercase tracking-wider">Elenco Task Operativi</h3>
               
@@ -573,7 +577,6 @@ function ProjectDetailContent({ params }: { params: Promise<{ id: string }> }) {
                 </table>
               </div>
 
-              {/* Form Nuovo Task */}
               <form onSubmit={handleAddTask} className="grid grid-cols-1 md:grid-cols-7 gap-3 pt-4 border-t border-gray-800">
                 <input type="text" placeholder="Titolo Task" value={newTaskTitle} onChange={e => setNewTaskTitle(e.target.value)} className="bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-xs text-white" required />
                 <input type="text" placeholder="Fase" value={newTaskPhase} onChange={e => setNewTaskPhase(e.target.value)} className="bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-xs text-white" />
