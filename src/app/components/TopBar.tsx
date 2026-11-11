@@ -7,7 +7,6 @@ import { useRouter } from 'next/navigation';
 export default function TopBar() {
   const router = useRouter();
   const [userEmail, setUserEmail] = useState<string>('');
-  const [isAdmin, setIsAdmin] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(true);
 
   const supabase = createBrowserClient(
@@ -22,17 +21,6 @@ export default function TopBar() {
 
       if (user) {
         setUserEmail(user.email || '');
-
-        // 2. Legge il profilo dinamico dalla tabella gos_profiles usando l'ID dell'utente attivo
-        const { data: profile } = await supabase
-          .from('gos_profiles')
-          .select('is_admin, role, full_text_name')
-          .eq('id', user.id)
-          .single();
-
-        if (profile) {
-          setIsAdmin(!!profile.is_admin);
-        }
       }
       setLoading(false);
     }
@@ -57,17 +45,6 @@ export default function TopBar() {
         <span className="font-mono text-gray-200">
           {loading ? 'Caricamento...' : userEmail}
         </span>
-
-        {/* Badge Ruolo/Admin dinamico */}
-        {isAdmin ? (
-          <span className="px-2.5 py-0.5 bg-amber-950/80 border border-amber-800 text-amber-500 font-bold uppercase rounded-md text-[10px]">
-            Administrator
-          </span>
-        ) : (
-          <span className="px-2.5 py-0.5 bg-gray-900 border border-gray-700 text-gray-400 font-bold uppercase rounded-md text-[10px]">
-            Member
-          </span>
-        )}
 
         {/* Bottone Edit Profile dinamico che punta all'ID utente loggato */}
         <button

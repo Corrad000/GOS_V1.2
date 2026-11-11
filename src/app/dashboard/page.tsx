@@ -1,68 +1,58 @@
+import { createServerClient } from '@supabase/ssr';
+import { cookies } from 'next/headers';
+import { redirect } from 'next/navigation';
 import { UserDashboardView } from '@/app/components/UserDashboardView';
-import { CompanyItem } from '@/app/components/CompanyTable';
 
 export default async function AdminDashboardPage() {
-  const userRole: 'admin' | 'advisor' = 'admin';
-  const userName = 'Corrado Pinna';
-
-  const initialCompanies: CompanyItem[] = [
+  const cookieStore = await cookies();
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
-      id: 'COMP-003',
-      ragione_sociale: 'mariella',
-      codice_azienda: 'COMP-003',
-      partita_iva: '12345678901',
-      advisor_nome: 'Corrado Pinna',
-      fatturato: 250000,
-      stato: 'ATTIVA',
-      contratti_attivi: 3
-    },
-    {
-      id: 'COMP-002',
-      ragione_sociale: 'mariella',
-      codice_azienda: 'COMP-002',
-      partita_iva: '12345678902',
-      advisor_nome: 'Corrado Pinna',
-      fatturato: 250000,
-      stato: 'ATTIVA',
-      contratti_attivi: 3
-    },
-    {
-      id: 'COMP-001',
-      ragione_sociale: 'asd',
-      codice_azienda: 'COMP-001',
-      partita_iva: '12345678903',
-      advisor_nome: 'Corrado Pinna',
-      fatturato: 250000,
-      stato: 'ATTIVA',
-      contratti_attivi: 3
-    },
-    {
-      id: 'COMP-004',
-      ragione_sociale: 'superpower',
-      codice_azienda: 'COMP-004',
-      partita_iva: '12345678904',
-      advisor_nome: 'Corrado Pinna',
-      fatturato: 250000,
-      stato: 'ACTIVE',
-      contratti_attivi: 3
-    },
-    {
-      id: 'COMP-005',
-      ragione_sociale: 'dd',
-      codice_azienda: 'COMP-005',
-      partita_iva: '12345678905',
-      advisor_nome: 'Corrado Pinna',
-      fatturato: 250000,
-      stato: 'ACTIVE',
-      contratti_attivi: 3
+      cookies: {
+        getAll() {
+          return cookieStore.getAll();
+        },
+        setAll() {},
+      },
     }
-  ];
+  );
+
+  // 1. Verifica l'utente autenticato dal server
+  const { data: { user }, error } = await supabase.auth.getUser();
+  if (error || !user) {
+    redirect('/');
+  }
+
+  // 2. Legge il profilo dinamico dalla tabella gos_profiles
+  const { data: profile } = await supabase
+    .from('gos_profiles')
+    .select('role, is_admin, email')
+    .eq('id', user.id)
+    .single();
+
+  const userRole = profile?.is_admin ? 'admin' : 'advisor';
+  const userName = profile?.email || user.email || 'Utente Network';
+
+  // 3. Recupero dinamico e filtrato delle aziende da Supabase
+  let companiesList = [];
+  
+  // Se l'utente è admin vede tutte le aziende, altrimenti solo quelle associate al suo ID (advisor_id)
+  const query = profile?.is_admin
+    ? supabase.from('companies').select('*')
+    : supabase.from('companies').select('*').eq('advisor_id', user.id);
+
+  const { data: fetchedCompanies, error: compError } = await query;
+
+  if (!compError && fetchedCompanies) {
+    companiesList = fetchedCompanies;
+  }
 
   return (
     <UserDashboardView
       userRole={userRole}
       userName={userName}
-      companies={initialCompanies}
+      companies={companiesList}
     />
   );
 }
