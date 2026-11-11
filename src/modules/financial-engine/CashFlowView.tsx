@@ -13,10 +13,12 @@ export interface CashFlowRowData {
 }
 
 interface CashFlowProps {
-  cashFlowRows: CashFlowRowData[];
+  cashFlowRows?: CashFlowRowData[];
 }
 
-export function CashFlowView({ cashFlowRows }: CashFlowProps) {
+export function CashFlowView({ cashFlowRows = [] }: CashFlowProps) {
+  const safeRows = cashFlowRows || [];
+
   return (
     <div className="space-y-6">
       <div className="border-b border-gray-800 pb-3">
@@ -37,28 +39,36 @@ export function CashFlowView({ cashFlowRows }: CashFlowProps) {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-900 text-gray-300">
-            {cashFlowRows.map((row, idx) => {
-              let rowStyle = 'hover:bg-gray-900/40 transition-colors';
-              if (row.isSubtotal) rowStyle = 'bg-gray-900/60 font-bold text-white border-t border-b border-gray-800';
-              if (row.isTotal) rowStyle = 'bg-emerald-950/30 font-extrabold text-white border-t border-emerald-900 text-sm';
+            {safeRows.length === 0 ? (
+              <tr>
+                <td colSpan={6} className="p-8 text-center text-gray-500 font-mono">
+                  Nessun dato di flusso di cassa disponibile. Compila i driver di input per generare il prospetto.
+                </td>
+              </tr>
+            ) : (
+              safeRows.map((row, idx) => {
+                let rowStyle = 'hover:bg-gray-900/40 transition-colors';
+                if (row.isSubtotal) rowStyle = 'bg-gray-900/60 font-bold text-white border-t border-b border-gray-800';
+                if (row.isTotal) rowStyle = 'bg-emerald-950/30 font-extrabold text-white border-t border-emerald-900 text-sm';
 
-              return (
-                <tr key={idx} className={rowStyle}>
-                  <td className={`p-4 ${row.indent ? 'pl-8 text-gray-400' : 'font-medium text-white'}`}>
-                    {row.label}
-                  </td>
-                  {row.values.map((val, yIdx) => {
-                    const formattedVal = Math.round(val).toLocaleString();
-                    const textCol = row.colorClass || (row.isNegative ? 'text-red-400' : 'text-white');
-                    return (
-                      <td key={yIdx} className={`p-4 text-center font-mono ${textCol}`}>
-                        {val < 0 ? `- € ${Math.abs(val).toLocaleString()}` : `€ ${formattedVal}`}
-                      </td>
-                    );
-                  })}
-                </tr>
-              );
-            })}
+                return (
+                  <tr key={idx} className={rowStyle}>
+                    <td className={`p-4 ${row.indent ? 'pl-8 text-gray-400' : 'font-medium text-white'}`}>
+                      {row.label}
+                    </td>
+                    {row.values.map((val, yIdx) => {
+                      const formattedVal = Math.round(val).toLocaleString();
+                      const textCol = row.colorClass || (row.isNegative ? 'text-red-400' : 'text-white');
+                      return (
+                        <td key={yIdx} className={`p-4 text-center font-mono ${textCol}`}>
+                          {val < 0 ? `- € ${Math.abs(val).toLocaleString()}` : `€ ${formattedVal}`}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })
+            )}
           </tbody>
         </table>
       </div>

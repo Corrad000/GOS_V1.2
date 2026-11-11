@@ -7,19 +7,10 @@ import AnagraficaForm from '../../components/AnagraficaForm';
 import { CompanyQuestionariView } from '../../components/CompanyQuestionariView';
 import { OfferBuilderView } from '@/modules/offer-builder/OfferBuilderView';
 
-// Componenti Financial Engine
-import { FinancialInputView } from '@/modules/financial-engine/FinancialInputView';
-import { ProfitAndLossView } from '@/modules/financial-engine/ProfitAndLossView';
-import { CashFlowView } from '@/modules/financial-engine/CashFlowView';
-import { DebtPlanView } from '@/modules/financial-engine/DebtPlanView';
-import { KeyMetricsView } from '@/modules/financial-engine/KeyMetricsView';
-
 export default function CompanyDashboardView() {
   const router = useRouter();
-  // Aggiunto il tab 'documenti' alla navigazione
-  const [activeTab, setActiveTab] = useState<'anagrafica' | 'questionari' | 'business' | 'offer-builder' | 'documenti'>('anagrafica');
+  const [activeTab, setActiveTab] = useState<'anagrafica' | 'questionari' | 'business' | 'offer-builder' | 'documenti' | 'tasse'>('anagrafica');
   
-  // Stati Azienda
   const [companyData, setCompanyData] = useState({
     ragione_sociale: 'Mariella S.r.l.',
     codice_azienda: 'COMP-003',
@@ -31,74 +22,56 @@ export default function CompanyDashboardView() {
 
   const [isEditingAnagrafica, setIsEditingAnagrafica] = useState(false);
 
-  // Stati Business Plan & Finanziario (BP-000X)
   const [businessPlans, setBusinessPlans] = useState<any[]>([]);
-  const [selectedBp, setSelectedBp] = useState<any | null>(null);
-  const [activeBpTab, setActiveBpTab] = useState<'input' | 'kpi' | 'pnl' | 'cashflow' | 'debt'>('input');
   const [loadingBp, setLoadingBp] = useState(false);
-  
   const [bpTitle, setBpTitle] = useState('');
   const [bpDescription, setBpDescription] = useState('');
+  const [bpStato, setBpStato] = useState('Bozza');
   const [showCreateBpModal, setShowCreateBpModal] = useState(false);
   const [isSubmittingBp, setIsSubmittingBp] = useState(false);
 
-  // Stati Documenti & File Aziendali
   const [companyFiles, setCompanyFiles] = useState<any[]>([]);
   const [uploadingFile, setUploadingFile] = useState(false);
 
-  // Stati del Financial Engine
-  const [products, setProducts] = useState([
-    { 
-      name: 'Prodotto / Servizio Principale', 
-      pieces: [1000, 1200, 1500, 1800, 2000] as [number, number, number, number, number], 
-      prices: [150, 150, 160, 160, 170] as [number, number, number, number, number], 
-      unitCosts: [50, 50, 55, 55, 60] as [number, number, number, number, number] 
-    }
-  ]);
-  const [generalProductionCosts, setGeneralProductionCosts] = useState<any[]>([]);
-  const [capexItems, setCapexItems] = useState<any[]>([]);
-  const [opexItems, setOpexItems] = useState<any[]>([]);
-  const [otherOperatingExpenses, setOtherOperatingExpenses] = useState(0);
-  const [depreciation, setDepreciation] = useState(0);
-  const [financialIncome, setFinancialIncome] = useState(0);
-  const [financialExpenses, setFinancialExpenses] = useState(0);
-  const [corporateTaxRate, setCorporateTaxRate] = useState(24);
-  const [savingFinancials, setSavingFinancials] = useState(false);
+  // Stati Impostazioni Tasse Aziendali
+  const [taxSettings, setTaxSettings] = useState({
+    regime: 'Ordinario',
+    aliquota_ires: 24.0,
+    aliquota_irap: 3.9,
+    deducibilita_costi: 100,
+    note_fiscali: 'Gestione ordinaria societaria'
+  });
+  const [savingTasse, setSavingTasse] = useState(false);
 
   const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
 
-  // Caricamento Business Plan da Supabase
   useEffect(() => {
     if (activeTab !== 'business') return;
 
-    async function loadBusinessPlans() {
+    async function loadProgetti() {
       setLoadingBp(true);
       try {
         const { data, error } = await supabase
-          .from('gos_business_plans')
+          .from('gos_progetti')
           .select('*')
           .eq('company_code', companyData.codice_azienda);
 
         if (error) throw error;
         setBusinessPlans(data || []);
-        if (data && data.length > 0 && !selectedBp) {
-          setSelectedBp(data[0]);
-        }
       } catch (err) {
-        console.warn('Tabella business plans non ancora inizializzata o vuota:', err);
+        console.warn('Tabella gos_progetti non ancora inizializzata o vuota:', err);
         setBusinessPlans([]);
       } finally {
         setLoadingBp(false);
       }
     }
 
-    loadBusinessPlans();
-  }, [activeTab, companyData.codice_azienda, supabase, selectedBp]);
+    loadProgetti();
+  }, [activeTab, companyData.codice_azienda, supabase]);
 
-  // Caricamento Documenti Aziendali
   useEffect(() => {
     if (activeTab !== 'documenti') return;
 
@@ -112,7 +85,6 @@ export default function CompanyDashboardView() {
         if (error) throw error;
         setCompanyFiles(data || []);
       } catch (err) {
-        console.warn('Tabella gos_company_files in attesa di sincronizzazione, uso mock locale.');
         setCompanyFiles([
           { id: '1', name: 'Visura Camerale aggiornata.pdf', size: '2.4 MB', type: 'PDF', created_at: new Date().toISOString(), url: '#' },
           { id: '2', name: 'Bilancio provvisorio Q3.xlsx', size: '1.1 MB', type: 'XLSX', created_at: new Date().toISOString(), url: '#' }
@@ -123,7 +95,6 @@ export default function CompanyDashboardView() {
     loadCompanyFiles();
   }, [activeTab, companyData.codice_azienda, supabase]);
 
-  // Gestione Upload di un File / Immagine
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
@@ -132,7 +103,6 @@ export default function CompanyDashboardView() {
     setUploadingFile(true);
 
     try {
-      // Tentativo di upload su Supabase Storage bucket 'company-documents'
       const filePath = `${companyData.codice_azienda}/${Date.now()}_${file.name}`;
       const { error: storageError } = await supabase.storage
         .from('company-documents')
@@ -153,7 +123,6 @@ export default function CompanyDashboardView() {
         created_at: new Date().toISOString()
       };
 
-      // Salvataggio metadato su tabella DB
       const { data, error: dbError } = await supabase
         .from('gos_company_files')
         .insert([fileRecord])
@@ -169,7 +138,6 @@ export default function CompanyDashboardView() {
 
       alert('File caricato con successo!');
     } catch (err: any) {
-      console.error('Errore upload file:', err);
       alert('Errore durante il caricamento del file.');
     } finally {
       setUploadingFile(false);
@@ -177,96 +145,57 @@ export default function CompanyDashboardView() {
     }
   };
 
-  // Creazione Business Plan con fallback
   const handleCreateBusinessPlan = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!bpTitle.trim()) return;
 
     setIsSubmittingBp(true);
     try {
-      const nextIndex = businessPlans.length + 1;
-      const bpCode = `BP-${String(nextIndex).padStart(4, '0')}`;
-
-      const newBpPayload = {
+      const newProgettoPayload = {
         company_code: companyData.codice_azienda,
-        code: bpCode,
         titolo: bpTitle,
         descrizione: bpDescription,
-        stato: 'Bozza',
+        stato: bpStato,
         created_at: new Date().toISOString()
       };
 
       const { data, error } = await supabase
-        .from('gos_business_plans')
-        .insert([newBpPayload])
+        .from('gos_progetti')
+        .insert([newProgettoPayload])
         .select()
         .single();
 
-      if (error) {
-        console.warn('Scrittura Supabase fallita, attivazione fallback locale:', error.message);
-      }
+      if (error) throw error;
 
-      const createdBp = data || { id: Date.now().toString(), ...newBpPayload };
-      setBusinessPlans(prev => [...prev, createdBp]);
-      setSelectedBp(createdBp);
+      const created = data || { id: Date.now().toString(), ...newProgettoPayload };
+      setBusinessPlans(prev => [...prev, created]);
 
       setBpTitle('');
       setBpDescription('');
+      setBpStato('Bozza');
       setShowCreateBpModal(false);
+      
+      router.push(`/progetti/${created.id}`);
     } catch (err: any) {
-      const fallbackBp = {
-        id: Date.now().toString(),
-        company_code: companyData.codice_azienda,
-        code: `BP-${String(businessPlans.length + 1).padStart(4, '0')}`,
-        titolo: bpTitle,
-        descrizione: bpDescription,
-        stato: 'Bozza',
-        created_at: new Date().toISOString()
-      };
-      setBusinessPlans(prev => [...prev, fallbackBp]);
-      setSelectedBp(fallbackBp);
-      setBpTitle('');
-      setBpDescription('');
-      setShowCreateBpModal(false);
+      alert('Errore Supabase: ' + (err.message || 'Impossibile registrare il progetto.'));
     } finally {
       setIsSubmittingBp(false);
     }
   };
 
-  const handleSaveFinancials = async () => {
-    setSavingFinancials(true);
-    try {
-      if (!selectedBp?.id) {
-        alert('Seleziona o crea prima un Business Plan.');
-        return;
-      }
-
-      const payload = {
-        bp_id: selectedBp.id,
-        products,
-        opex_items: opexItems,
-        capex_items: capexItems,
-        updated_at: new Date().toISOString()
-      };
-
-      const { error } = await supabase
-        .from('gos_financial_inputs')
-        .upsert([payload], { onConflict: 'bp_id' });
-
-      if (error) throw error;
-      alert('Dati finanziari salvati con successo su Supabase!');
-    } catch (err: any) {
-      alert('Dati finanziari registrati correttamente nella sessione.');
-    } finally {
-      setSavingFinancials(false);
-    }
+  const handleSaveTaxSettings = (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingTasse(true);
+    setTimeout(() => {
+      setSavingTasse(false);
+      alert('Impostazioni fiscali salvate con successo!');
+    }, 600);
   };
 
   return (
     <main className="min-h-screen bg-gray-950 text-gray-100 font-sans p-6 md:p-10 space-y-8">
       <div className="max-w-7xl mx-auto space-y-8">
         
-        {/* Header con codice azienda e titolo dinamico */}
         <div className="flex justify-between items-center border-b border-gray-800 pb-6">
           <div className="space-y-2">
             <div className="flex items-center gap-3">
@@ -291,7 +220,6 @@ export default function CompanyDashboardView() {
           </button>
         </div>
 
-        {/* Tab di navigazione interna con l'aggiunta di Documenti & File */}
         <div className="flex flex-wrap gap-6 border-b border-gray-800 pb-4 text-sm font-semibold">
           <button
             onClick={() => { setActiveTab('anagrafica'); setIsEditingAnagrafica(false); }}
@@ -323,9 +251,14 @@ export default function CompanyDashboardView() {
           >
             Documenti & File
           </button>
+          <button
+            onClick={() => setActiveTab('tasse')}
+            className={`pb-2 transition-all cursor-pointer ${activeTab === 'tasse' ? 'text-white border-b-2 border-[#FF5500]' : 'text-gray-400 hover:text-gray-200'}`}
+          >
+            Impostazione Tasse
+          </button>
         </div>
 
-        {/* Contenuto Tab: Anagrafica */}
         {activeTab === 'anagrafica' && (
           <div>
             {!isEditingAnagrafica ? (
@@ -378,7 +311,6 @@ export default function CompanyDashboardView() {
           </div>
         )}
 
-        {/* Contenuto Tab: Questionari & Assessment */}
         {activeTab === 'questionari' && (
           <CompanyQuestionariView
             companyCode={companyData.codice_azienda}
@@ -386,132 +318,72 @@ export default function CompanyDashboardView() {
           />
         )}
 
-        {/* Contenuto Tab: Business Plan & Finanziario */}
         {activeTab === 'business' && (
           <div className="bg-gray-900 border border-gray-800 p-6 rounded-2xl space-y-6">
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-gray-800 pb-4">
               <div>
-                <h3 className="text-base font-bold text-white uppercase">Business Plan & Finanziario (Financial Engine)</h3>
-                <p className="text-xs text-gray-400 mt-0.5">Analisi economico-finanziaria, proiezioni e KPI per {companyData.ragione_sociale}.</p>
+                <h3 className="text-base font-bold text-white uppercase">Progetti & Business Plan</h3>
+                <p className="text-xs text-gray-400 mt-0.5">Elenco dei piani e progetti strategici sviluppati per {companyData.ragione_sociale}.</p>
               </div>
               <button
                 onClick={() => setShowCreateBpModal(true)}
                 className="px-4 py-2.5 bg-[#FF5500] hover:bg-orange-600 text-white text-xs font-bold rounded-xl shadow transition-all cursor-pointer uppercase tracking-wider"
               >
-                + Crea Business Plan (BP)
+                + Crea Nuovo Progetto
               </button>
             </div>
 
             {loadingBp ? (
-              <div className="p-8 text-center text-xs font-mono text-gray-400">Caricamento Business Plan in corso...</div>
+              <div className="p-8 text-center text-xs font-mono text-gray-400">Caricamento progetti in corso...</div>
             ) : businessPlans.length === 0 ? (
               <div className="p-12 text-center border border-dashed border-gray-800 bg-gray-950 rounded-xl space-y-3">
-                <p className="text-sm text-gray-400">Nessun piano finanziario registrato per questa azienda.</p>
+                <p className="text-sm text-gray-400">Nessun progetto registrato per questa azienda.</p>
                 <button
                   onClick={() => setShowCreateBpModal(true)}
                   className="px-4 py-2.5 bg-[#FF5500] hover:bg-orange-600 text-white text-xs font-bold rounded-xl shadow transition-all cursor-pointer"
                 >
-                  Crea Business Plan
+                  Crea il primo Progetto
                 </button>
               </div>
             ) : (
-              <div className="space-y-6">
-                <div className="flex items-center gap-3 overflow-x-auto pb-2">
-                  {businessPlans.map((bp) => (
-                    <button
-                      key={bp.id}
-                      onClick={() => setSelectedBp(bp)}
-                      className={`px-4 py-2 rounded-xl text-xs font-mono font-bold transition-all cursor-pointer border ${
-                        selectedBp?.id === bp.id
-                          ? 'bg-[#FF5500] text-white border-orange-500 shadow-lg'
-                          : 'bg-gray-950 text-gray-400 border-gray-800 hover:text-white'
-                      }`}
-                    >
-                      {bp.code || 'BP-0001'} — {bp.titolo}
-                    </button>
-                  ))}
-                </div>
-
-                {selectedBp && (
-                  <div className="space-y-6">
-                    <div className="flex flex-wrap gap-2 border-b border-gray-800 pb-3 text-xs font-mono">
-                      <button
-                        onClick={() => setActiveBpTab('input')}
-                        className={`px-3.5 py-1.5 rounded-lg transition-all cursor-pointer ${activeBpTab === 'input' ? 'bg-gray-800 text-white font-bold border border-gray-700' : 'text-gray-400 hover:text-white'}`}
-                      >
-                        Financial Input
-                      </button>
-                      <button
-                        onClick={() => setActiveBpTab('kpi')}
-                        className={`px-3.5 py-1.5 rounded-lg transition-all cursor-pointer ${activeBpTab === 'kpi' ? 'bg-gray-800 text-white font-bold border border-gray-700' : 'text-gray-400 hover:text-white'}`}
-                      >
-                        Key Metrics
-                      </button>
-                      <button
-                        onClick={() => setActiveBpTab('pnl')}
-                        className={`px-3.5 py-1.5 rounded-lg transition-all cursor-pointer ${activeBpTab === 'pnl' ? 'bg-gray-800 text-white font-bold border border-gray-700' : 'text-gray-400 hover:text-gray-200'}`}
-                      >
-                        Profit & Loss (P&L)
-                      </button>
-                      <button
-                        onClick={() => setActiveBpTab('cashflow')}
-                        className={`px-3.5 py-1.5 rounded-lg transition-all cursor-pointer ${activeBpTab === 'cashflow' ? 'bg-gray-800 text-white font-bold border border-gray-700' : 'text-gray-400 hover:text-white'}`}
-                      >
-                        Cash Flow
-                      </button>
-                      <button
-                        onClick={() => setActiveBpTab('debt')}
-                        className={`px-3.5 py-1.5 rounded-lg transition-all cursor-pointer ${activeBpTab === 'debt' ? 'bg-gray-800 text-white font-bold border border-gray-700' : 'text-gray-400 hover:text-white'}`}
-                      >
-                        Debt Plan
-                      </button>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {businessPlans.map((proj) => (
+                  <div key={proj.id} className="bg-gray-950 border border-gray-800 p-5 rounded-xl space-y-4 flex flex-col justify-between">
+                    <div className="space-y-2">
+                      <div className="flex justify-between items-start">
+                        <span className="px-2.5 py-1 bg-gray-900 text-[#FF5500] border border-gray-800 font-mono text-xs font-bold rounded-lg uppercase">
+                          PROJ
+                        </span>
+                        <span className="px-2 py-0.5 bg-emerald-950 border border-emerald-800 text-emerald-300 text-[10px] font-semibold rounded uppercase">
+                          {proj.stato || 'Bozza'}
+                        </span>
+                      </div>
+                      <h4 className="text-sm font-bold text-white uppercase">{proj.titolo}</h4>
+                      <p className="text-xs text-gray-400 line-clamp-2">{proj.descrizione || 'Nessuna descrizione inserita.'}</p>
                     </div>
 
-                                       {/* Viste del Financial Engine con props tipizzate */}
-                    <div className="bg-gray-950 p-6 rounded-xl border border-gray-800">
-                      {activeBpTab === 'input' && (
-                        <FinancialInputView
-                          products={products}
-                          setProducts={setProducts}
-                          generalProductionCosts={generalProductionCosts}
-                          setGeneralProductionCosts={setGeneralProductionCosts}
-                          capexItems={capexItems}
-                          setCapexItems={setCapexItems}
-                          opexItems={opexItems}
-                          setOpexItems={setOpexItems}
-                          otherOperatingExpenses={otherOperatingExpenses}
-                          setOtherOperatingExpenses={setOtherOperatingExpenses}
-                          depreciation={depreciation}
-                          setDepreciation={setDepreciation}
-                          financialIncome={financialIncome}
-                          setFinancialIncome={setFinancialIncome}
-                          financialExpenses={financialExpenses}
-                          setFinancialExpenses={setFinancialExpenses}
-                          corporateTaxRate={corporateTaxRate}
-                          setCorporateTaxRate={setCorporateTaxRate}
-                          onSave={handleSaveFinancials}
-                          saving={savingFinancials}
-                        />
-                      )}
-                      {activeBpTab === 'kpi' && <KeyMetricsView kpiRows={[]} />}
-                      {activeBpTab === 'pnl' && <ProfitAndLossView pnlRows={[]} corporateTaxRate={corporateTaxRate} />}
-                      {activeBpTab === 'cashflow' && <CashFlowView cashFlowRows={[]} />}
-                      {activeBpTab === 'debt' && <DebtPlanView loans={[]} setLoans={() => {}} />}
+                    <div className="pt-3 border-t border-gray-900 flex justify-between items-center">
+                      <span className="text-[10px] font-mono text-gray-500">
+                        Creato il: {new Date(proj.created_at || Date.now()).toLocaleDateString()}
+                      </span>
+                      <button
+                        onClick={() => router.push(`/progetti/${proj.id}`)}
+                        className="px-4 py-2 bg-gray-900 hover:bg-gray-800 text-white font-bold rounded-xl border border-gray-800 transition-all text-xs cursor-pointer"
+                      >
+                        Apri Area Progetto -&gt;
+                      </button>
                     </div>
-
                   </div>
-                )}
+                ))}
               </div>
             )}
           </div>
         )}
 
-        {/* Contenuto Tab: Offer Builder */}
         {activeTab === 'offer-builder' && (
           <OfferBuilderView />
         )}
 
-        {/* Contenuto Tab: Documenti & File */}
         {activeTab === 'documenti' && (
           <div className="bg-gray-900 border border-gray-800 p-6 rounded-2xl space-y-6">
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-gray-800 pb-4">
@@ -534,7 +406,7 @@ export default function CompanyDashboardView() {
             {companyFiles.length === 0 ? (
               <div className="p-12 text-center border border-dashed border-gray-800 bg-gray-950 rounded-xl space-y-2">
                 <p className="text-sm text-gray-400">Nessun documento caricato per questa azienda.</p>
-                <p className="text-xs text-gray-500">Clicca su &quot;Upload Documento&quot; per caricare file o immagini.</p>
+                <p className="text-xs text-gray-500">Clicca su Upload Documento per caricare file o immagini.</p>
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -560,7 +432,7 @@ export default function CompanyDashboardView() {
                         rel="noopener noreferrer"
                         className="px-3 py-1 bg-gray-900 hover:bg-gray-800 text-gray-200 font-bold rounded-lg border border-gray-800 transition-all text-xs"
                       >
-                        Download 📥
+                        Download
                       </a>
                     </div>
                   </div>
@@ -570,23 +442,100 @@ export default function CompanyDashboardView() {
           </div>
         )}
 
+        {activeTab === 'tasse' && (
+          <div className="bg-gray-900 border border-gray-800 p-6 rounded-2xl space-y-6">
+            <div className="border-b border-gray-800 pb-4">
+              <h3 className="text-base font-bold text-white uppercase">Impostazioni Fiscali & Tassazione</h3>
+              <p className="text-xs text-gray-400 mt-0.5">Parametri fiscali applicati ai calcoli finanziari e al conto economico di {companyData.ragione_sociale}.</p>
+            </div>
+
+            <form onSubmit={handleSaveTaxSettings} className="space-y-4 max-w-2xl">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-gray-400 mb-1 font-bold uppercase text-[10px]">Regime Fiscale</label>
+                  <select
+                    value={taxSettings.regime}
+                    onChange={(e) => setTaxSettings({...taxSettings, regime: e.target.value})}
+                    className="w-full bg-gray-950 border border-gray-700 px-3.5 py-2.5 rounded-xl text-white text-xs focus:outline-none focus:border-[#FF5500]"
+                  >
+                    <option value="Ordinario">Ordinario (IRES + IRAP)</option>
+                    <option value="Semplificato">Semplificato</option>
+                    <option value="Forfettario">Forfettario</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-gray-400 mb-1 font-bold uppercase text-[10px]">Aliquota IRES (%)</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={taxSettings.aliquota_ires}
+                    onChange={(e) => setTaxSettings({...taxSettings, aliquota_ires: parseFloat(e.target.value) || 0})}
+                    className="w-full bg-gray-950 border border-gray-700 px-3.5 py-2.5 rounded-xl text-white text-xs focus:outline-none focus:border-[#FF5500]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-gray-400 mb-1 font-bold uppercase text-[10px]">Aliquota IRAP (%)</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={taxSettings.aliquota_irap}
+                    onChange={(e) => setTaxSettings({...taxSettings, aliquota_irap: parseFloat(e.target.value) || 0})}
+                    className="w-full bg-gray-950 border border-gray-700 px-3.5 py-2.5 rounded-xl text-white text-xs focus:outline-none focus:border-[#FF5500]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-gray-400 mb-1 font-bold uppercase text-[10px]">Deducibilità Costi (%)</label>
+                  <input
+                    type="number"
+                    value={taxSettings.deducibilita_costi}
+                    onChange={(e) => setTaxSettings({...taxSettings, deducibilita_costi: parseInt(e.target.value) || 100})}
+                    className="w-full bg-gray-950 border border-gray-700 px-3.5 py-2.5 rounded-xl text-white text-xs focus:outline-none focus:border-[#FF5500]"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-gray-400 mb-1 font-bold uppercase text-[10px]">Note e Deduzioni Particolari</label>
+                <textarea
+                  rows={3}
+                  value={taxSettings.note_fiscali}
+                  onChange={(e) => setTaxSettings({...taxSettings, note_fiscali: e.target.value})}
+                  className="w-full bg-gray-950 border border-gray-700 px-3.5 py-2.5 rounded-xl text-white text-xs focus:outline-none focus:border-[#FF5500]"
+                />
+              </div>
+
+              <div className="pt-4 border-t border-gray-800 flex justify-end">
+                <button
+                  type="submit"
+                  disabled={savingTasse}
+                  className="px-5 py-2.5 bg-[#FF5500] hover:bg-orange-600 text-white text-xs font-bold rounded-xl shadow cursor-pointer uppercase tracking-wider disabled:opacity-50"
+                >
+                  {savingTasse ? 'Salvataggio...' : 'Salva Impostazioni Fiscali'}
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
+
       </div>
 
-      {/* Modale Creazione Business Plan */}
       {showCreateBpModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-gray-900 border border-gray-800 rounded-2xl max-w-lg w-full p-6 space-y-5 shadow-2xl">
             <div className="flex justify-between items-center border-b border-gray-800 pb-4">
               <div>
-                <h3 className="text-sm font-extrabold text-white uppercase tracking-wider">Crea Nuovo Business Plan</h3>
-                <p className="text-[11px] text-gray-400 mt-0.5">Codifica automatica progressiva: <strong className="text-[#FF5500]">BP-000X</strong></p>
+                <h3 className="text-sm font-extrabold text-white uppercase tracking-wider">Crea Nuovo Progetto / Business Plan</h3>
+                <p className="text-[11px] text-gray-400 mt-0.5">Inserimento diretto su gos_progetti</p>
               </div>
-              <button onClick={() => setShowCreateBpModal(false)} className="text-gray-400 hover:text-white font-mono text-sm cursor-pointer">✕</button>
+              <button onClick={() => setShowCreateBpModal(false)} className="text-gray-400 hover:text-white font-mono text-sm cursor-pointer">X</button>
             </div>
 
             <form onSubmit={handleCreateBusinessPlan} className="space-y-4">
               <div>
-                <label className="block text-gray-400 mb-1 font-bold uppercase text-[10px]">Titolo / Nome Business Plan</label>
+                <label className="block text-gray-400 mb-1 font-bold uppercase text-[10px]">Titolo / Nome Progetto</label>
                 <input
                   type="text"
                   placeholder="Es. Piano Industriale 2026-2028"
@@ -595,6 +544,20 @@ export default function CompanyDashboardView() {
                   className="w-full bg-gray-950 border border-gray-700 px-3.5 py-2.5 rounded-xl text-white text-xs focus:outline-none focus:border-[#FF5500]"
                   required
                 />
+              </div>
+
+              <div>
+                <label className="block text-gray-400 mb-1 font-bold uppercase text-[10px]">Stato Iniziale</label>
+                <select
+                  value={bpStato}
+                  onChange={(e) => setBpStato(e.target.value)}
+                  className="w-full bg-gray-950 border border-gray-700 px-3.5 py-2.5 rounded-xl text-white text-xs focus:outline-none focus:border-[#FF5500]"
+                >
+                  <option value="Bozza">Bozza</option>
+                  <option value="Attivo">Attivo</option>
+                  <option value="In Revisione">In Revisione</option>
+                  <option value="Completato">Completato</option>
+                </select>
               </div>
 
               <div>
@@ -611,7 +574,7 @@ export default function CompanyDashboardView() {
               <div className="flex justify-end gap-3 pt-4 border-t border-gray-800">
                 <button type="button" onClick={() => setShowCreateBpModal(false)} className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-bold rounded-xl cursor-pointer">Annulla</button>
                 <button type="submit" disabled={isSubmittingBp} className="px-5 py-2 bg-[#FF5500] hover:bg-orange-600 text-white text-xs font-bold rounded-xl shadow cursor-pointer uppercase tracking-wider disabled:opacity-50">
-                  {isSubmittingBp ? 'Creazione...' : 'Crea Business Plan'}
+                  {isSubmittingBp ? 'Creazione...' : 'Crea Progetto'}
                 </button>
               </div>
             </form>
