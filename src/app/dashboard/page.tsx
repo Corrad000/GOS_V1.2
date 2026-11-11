@@ -24,23 +24,29 @@ export default async function AdminDashboardPage() {
     redirect('/');
   }
 
-  // 2. Legge il profilo dinamico dalla tabella gos_profiles
+  // 2. Legge il profilo dinamico dalla tabella gos_profiles (incluso nome e ruolo esteso)
   const { data: profile } = await supabase
     .from('gos_profiles')
-    .select('role, is_admin, email')
+    .select('role, is_admin, email, nome')
     .eq('id', user.id)
     .single();
 
-  const userRole = profile?.is_admin ? 'admin' : 'advisor';
-  const userName = profile?.email || user.email || 'Utente Network';
+  // Determina in modo sicuro se è admin in base a is_admin o ai vari valori possibili della colonna role
+  const isAdmin = profile?.is_admin === true || 
+                  profile?.role === 'admin' || 
+                  profile?.role === 'Administrator' || 
+                  profile?.role === 'amministratore';
+
+  const userRole = isAdmin ? 'admin' : 'user';
+  const userName = profile?.nome || profile?.email || user.email || 'Utente Network';
 
   // 3. Recupero dinamico e filtrato delle aziende dalla tabella corretta gos_aziende
   let companiesList = [];
   
-  // Se l'admin vede tutto, altrimenti filtra per advisor (se la colonna esiste, altrimenti mostra tutte o filtra per advisor_nome)
-  const query = profile?.is_admin
-    ? supabase.from('gos_aziende').select('*').order('created_at', { ascending: false })
-    : supabase.from('gos_aziende').select('*').order('created_at', { ascending: false });
+  const query = supabase
+    .from('gos_aziende')
+    .select('*')
+    .order('created_at', { ascending: false });
 
   const { data: fetchedCompanies, error: compError } = await query;
 

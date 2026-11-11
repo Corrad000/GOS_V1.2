@@ -11,13 +11,13 @@ export default function ProfilePage() {
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // Campi del profilo
-  const [fullName, setFullName] = useState('Corrado Pinna');
-  const [email, setEmail] = useState('corrado.pinna@glaring.world');
-  const [role, setRole] = useState('Administrator');
-  const [avatarUrl, setAvatarUrl] = useState('https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=400&auto=format&fit=crop&q=80');
+  const [fullName, setFullName] = useState('');
+  const [email, setEmail] = useState('');
+  const [role, setRole] = useState('');
+  const [avatarUrl, setAvatarUrl] = useState('');
   
   // Dati anagrafici, contatto ed emergenza
-  const [phone, setPhone] = useState('+39 340 0000000');
+  const [phone, setPhone] = useState('');
   const [emergencyContactName, setEmergencyContactName] = useState('');
   const [emergencyContactPhone, setEmergencyContactPhone] = useState('');
   const [status, setStatus] = useState<'Active' | 'Busy' | 'Away' | 'Offline'>('Active');
@@ -26,9 +26,9 @@ export default function ProfilePage() {
   const [addressStreet, setAddressStreet] = useState('');
   const [addressNumber, setAddressNumber] = useState('');
   const [addressPostalCode, setAddressPostalCode] = useState('');
-  const [addressCity, setAddressCity] = useState('Cagliari');
-  const [addressRegion, setAddressRegion] = useState('Sardegna');
-  const [addressCountry, setAddressCountry] = useState('Italia');
+  const [addressCity, setAddressCity] = useState('');
+  const [addressRegion, setAddressRegion] = useState('');
+  const [addressCountry, setAddressCountry] = useState('');
 
   const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -179,12 +179,16 @@ export default function ProfilePage() {
         
         {/* Sezione Foto Profilo con Upload */}
         <div className="flex flex-col sm:flex-row items-center gap-6 pb-6 border-b border-[#1E293B]">
-          <div className="relative w-20 h-20 rounded-full overflow-hidden border-2 border-gray-700 bg-gray-900 shrink-0">
-            <img 
-              src={avatarUrl} 
-              alt="Avatar" 
-              className="w-full h-full object-cover"
-            />
+          <div className="relative w-20 h-20 rounded-full overflow-hidden border-2 border-gray-700 bg-gray-900 shrink-0 flex items-center justify-center">
+            {avatarUrl ? (
+              <img 
+                src={avatarUrl} 
+                alt="Avatar" 
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <span className="text-gray-500 text-[10px] font-mono">NO FOTO</span>
+            )}
           </div>
           <div className="space-y-2 w-full">
             <label className="text-xs font-bold text-gray-200 uppercase tracking-wider block">Foto Profilo (Upload)</label>

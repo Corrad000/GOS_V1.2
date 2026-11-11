@@ -8,7 +8,7 @@ import { QuestModulo } from './QuestModulo';
 import { OfferBuilderView } from '@/modules/offer-builder/OfferBuilderView';
 
 interface UserDashboardViewProps {
-  userRole: 'admin' | 'advisor';
+  userRole: 'admin' | 'user' | 'advisor' | 'Network Partner';
   userName: string;
   companies: CompanyItem[];
 }

@@ -12,7 +12,7 @@ function NavigationHeader() {
   const pathname = usePathname();
   const [mounted, setMounted] = useState(false);
   const [userEmail, setUserEmail] = useState<string | null>(null);
-  const [userRole, setUserRole] = useState<string>('Administrator');
+  const [userRole, setUserRole] = useState<string>('');
   const [loginTime, setLoginTime] = useState<string>('');
   const [sessionDuration, setSessionDuration] = useState('00:00:00');
   const [currentDate, setCurrentDate] = useState('');
