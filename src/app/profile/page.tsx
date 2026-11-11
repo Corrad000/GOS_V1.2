@@ -1,386 +1,388 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { createBrowserClient } from '@supabase/ssr';
 
 export default function ProfilePage() {
-  const [formData, setFormData] = useState({
-    fullName: 'Corrado Pinna',
-    email: 'corrado.pinna@glaring.world',
-    role: 'Administrator',
-    organization: 'Glaring LLP',
-    phone: '+39 070 1234567',
-    location: 'Cagliari, Sardinia',
-    bio: 'Executive Consultant & Strategic Advisor in Corporate Strategy, Operational Transformation and Commercial Development.',
-  });
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  // Gestione Avatar / Foto Profilo
-  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  // Campi del profilo
+  const [fullName, setFullName] = useState('Corrado Pinna');
+  const [email, setEmail] = useState('corrado.pinna@glaring.world');
+  const [role, setRole] = useState('Administrator');
+  const [avatarUrl, setAvatarUrl] = useState('https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=400&auto=format&fit=crop&q=80');
+  
+  // Dati anagrafici, contatto ed emergenza
+  const [phone, setPhone] = useState('+39 340 0000000');
+  const [emergencyContactName, setEmergencyContactName] = useState('');
+  const [emergencyContactPhone, setEmergencyContactPhone] = useState('');
+  const [status, setStatus] = useState<'Active' | 'Busy' | 'Away' | 'Offline'>('Active');
+  
+  // Indirizzo
+  const [addressStreet, setAddressStreet] = useState('');
+  const [addressNumber, setAddressNumber] = useState('');
+  const [addressPostalCode, setAddressPostalCode] = useState('');
+  const [addressCity, setAddressCity] = useState('Cagliari');
+  const [addressRegion, setAddressRegion] = useState('Sardegna');
+  const [addressCountry, setAddressCountry] = useState('Italia');
 
-  // Gestione Cambio Password
-  const [passwordData, setPasswordData] = useState({
-    currentPassword: '',
-    newPassword: '',
-    confirmPassword: '',
-  });
+  const supabase = createBrowserClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
 
-  const [savedProfile, setSavedProfile] = useState(false);
-  const [savedPassword, setSavedPassword] = useState(false);
-  const [passwordError, setPasswordError] = useState('');
+  useEffect(() => {
+    async function loadUserProfile() {
+      try {
+        setLoading(true);
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          setEmail(user.email || '');
+          if (user.user_metadata?.full_name) setFullName(user.user_metadata.full_name);
+          if (user.user_metadata?.role) setRole(user.user_metadata.role);
+          if (user.user_metadata?.phone) setPhone(user.user_metadata.phone);
+          if (user.user_metadata?.emergencyContactName) setEmergencyContactName(user.user_metadata.emergencyContactName);
+          if (user.user_metadata?.emergencyContactPhone) setEmergencyContactPhone(user.user_metadata.emergencyContactPhone);
+          if (user.user_metadata?.status) setStatus(user.user_metadata.status);
+          if (user.user_metadata?.avatar_url) setAvatarUrl(user.user_metadata.avatar_url);
+          
+          const addr = user.user_metadata?.address;
+          if (addr) {
+            setAddressStreet(addr.street || '');
+            setAddressNumber(addr.number || '');
+            setAddressPostalCode(addr.postalCode || '');
+            setAddressCity(addr.city || '');
+            setAddressRegion(addr.region || '');
+            setAddressCountry(addr.country || '');
+          }
+        }
+      } catch (error) {
+        console.error('Errore nel caricamento del profilo:', error);
+      } finally {
+        setLoading(false);
+      }
+    }
+    loadUserProfile();
+  }, [supabase]);
 
-  // Caricamento Foto Profilo
-  const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const imageUrl = URL.createObjectURL(file);
-      setAvatarUrl(imageUrl);
+  // Gestione dell'upload dell'immagine su Supabase Storage
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    try {
+      const files = e.target.files;
+      if (!files || files.length === 0) return;
       
-      /* Supabase Upload Blueprint:
-         const fileExt = file.name.split('.').pop();
-         const filePath = `${userId}/${Math.random()}.${fileExt}`;
-         await supabase.storage.from('avatars').upload(filePath, file);
-      */
+      const file = files[0];
+      setUploadingImage(true);
+      setMessage(null);
+
+      const fileExt = file.name.split('.').pop();
+      const fileName = `avatar-${Math.random().toString(36).substring(2)}-${Date.now()}.${fileExt}`;
+      const filePath = `${fileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('avatars')
+        .upload(filePath, file);
+
+      if (uploadError) {
+        throw uploadError;
+      }
+
+      const { data: { publicUrl } } = supabase.storage
+        .from('avatars')
+        .getPublicUrl(filePath);
+
+      setAvatarUrl(publicUrl);
+      setMessage({ type: 'success', text: 'Immagine caricata con successo! Ricorda di salvare le modifiche.' });
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message || "Errore durante l'upload dell'immagine. Assicurati che esista il bucket 'avatars' su Supabase." });
+    } finally {
+      setUploadingImage(false);
     }
   };
 
-  // Salvataggio Dati Profilo
-  const handleProfileSubmit = async (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    /* Supabase Update Blueprint:
-       await supabase.from('profiles').upsert({
-         id: userId,
-         full_name: formData.fullName,
-         phone: formData.phone,
-         location: formData.location,
-         bio: formData.bio,
-         avatar_url: avatarUrl,
-         updated_at: new Date().toISOString(),
-       });
-    */
+    setSaving(true);
+    setMessage(null);
 
-    setSavedProfile(true);
-    setTimeout(() => setSavedProfile(false), 3000);
+    try {
+      const { error } = await supabase.auth.updateUser({
+        data: {
+          full_name: fullName,
+          phone,
+          emergencyContactName,
+          emergencyContactPhone,
+          status,
+          avatar_url: avatarUrl,
+          address: {
+            street: addressStreet,
+            number: addressNumber,
+            postalCode: addressPostalCode,
+            city: addressCity,
+            region: addressRegion,
+            country: addressCountry
+          }
+        }
+      });
+
+      if (error) throw error;
+
+      setMessage({ type: 'success', text: 'Profilo, anagrafica e contatti di emergenza aggiornati con successo!' });
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message || 'Errore durante il salvataggio.' });
+    } finally {
+      setSaving(false);
+    }
   };
 
-  // Aggiornamento Password
-  const handlePasswordSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setPasswordError('');
-
-    if (passwordData.newPassword.length < 8) {
-      setPasswordError('La nuova password deve contenere almeno 8 caratteri.');
-      return;
-    }
-    if (passwordData.newPassword !== passwordData.confirmPassword) {
-      setPasswordError('Le nuove password non coincidono.');
-      return;
-    }
-
-    /* Supabase Auth Password Update Blueprint:
-       const { error } = await supabase.auth.updateUser({
-         password: passwordData.newPassword
-       });
-    */
-
-    setSavedPassword(true);
-    setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
-    setTimeout(() => setSavedPassword(false), 4000);
-  };
+  if (loading) {
+    return (
+      <div className="flex justify-center items-center py-20 text-gray-400 font-mono text-sm">
+        Caricamento profilo in corso...
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-6">
-      {/* Input hidden per il caricamento file dell'avatar */}
-      <input
-        type="file"
-        ref={fileInputRef}
-        onChange={handleAvatarChange}
-        accept="image/*"
-        className="hidden"
-      />
-
-      {/* Header Pagina */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 pb-4 border-b border-[#1E293B]">
-        <div>
-          <span className="text-xs font-mono text-gray-400 uppercase tracking-widest block">
-            GOS 1.2 — AMMINISTRAZIONE ACCOUNT
-          </span>
-          <h1 className="text-3xl font-extrabold text-white tracking-tight mt-1">
-            Profilo Utente & Impostazioni
-          </h1>
-          <p className="text-sm text-gray-400 mt-1">
-            Gestisci le tue informazioni personali e le credenziali di accesso al sistema.
-          </p>
-        </div>
-        <Link
-          href="/admin"
-          className="self-start md:self-auto px-4 py-2 bg-[#1E293B] hover:bg-[#334155] text-white font-bold text-xs border border-[#334155] transition-all flex items-center gap-2 rounded-none"
+    <div className="max-w-4xl mx-auto space-y-6 pb-12">
+      
+      {/* Breadcrumb di Navigazione */}
+      <nav className="flex items-center gap-2 text-xs text-gray-400">
+        <Link 
+          href="/admin" 
+          className="hover:text-white transition-colors flex items-center gap-1.5"
         >
-          ← Torna al Control Center
+          <span>←</span> Torna alla Dashboard
         </Link>
+        <span className="text-gray-700">/</span>
+        <span className="text-emerald-400 font-medium">Profilo Utente</span>
+      </nav>
+
+      {/* Intestazione */}
+      <div>
+        <h1 className="text-xl font-extrabold text-white tracking-tight">Profilo Utente & Anagrafica</h1>
+        <p className="text-xs text-gray-400 mt-1">Gestisci le tue informazioni personali, foto, contatti, indirizzo e stato operativo.</p>
       </div>
 
-      {/* Notifiche di salvataggio */}
-      {savedProfile && (
-        <div className="p-4 bg-emerald-950/80 border border-emerald-500/50 text-emerald-300 text-sm font-bold flex items-center justify-between">
-          <span>✓ Profilo aggiornato e sincronizzato con la banca dati!</span>
+      {message && (
+        <div className={`p-4 text-xs font-medium border ${message.type === 'success' ? 'bg-emerald-950/40 border-emerald-800 text-emerald-300' : 'bg-red-950/40 border-red-800 text-red-300'}`}>
+          {message.text}
         </div>
       )}
 
-      {savedPassword && (
-        <div className="p-4 bg-emerald-950/80 border border-emerald-500/50 text-emerald-300 text-sm font-bold flex items-center justify-between">
-          <span>✓ Password aggiornata con successo in Supabase Auth.</span>
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      {/* Form Principale */}
+      <form onSubmit={handleSave} className="bg-[#0F172A] border border-[#1E293B] p-6 space-y-6 shadow-xl">
         
-        {/* COLONNA SINISTRA: Avatar + Sicurezza Account */}
-        <div className="space-y-6">
-          
-          {/* Card Avatar & Dati Sintetici */}
-          <div className="bg-[#0F172A] border border-[#1E293B] p-6 text-center">
-            
-            {/* Quadratino Avatar Interattivo */}
-            <div className="relative group w-28 h-28 mx-auto mb-4 cursor-pointer" onClick={() => fileInputRef.current?.click()}>
-              {avatarUrl ? (
-                <img
-                  src={avatarUrl}
-                  alt="Avatar Profilo"
-                  className="w-full h-full object-cover border-2 border-emerald-500 rounded-none"
-                />
-              ) : (
-                <div className="w-full h-full bg-slate-800 border-2 border-emerald-500 rounded-none flex items-center justify-center text-3xl font-extrabold text-white">
-                  CP
-                </div>
-              )}
-              
-              {/* Overlay hover per caricare la foto */}
-              <div className="absolute inset-0 bg-black/70 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center text-white text-[10px] font-bold uppercase tracking-wider p-1">
-                <span>📷 Carica Foto</span>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="text-[11px] font-bold text-emerald-400 hover:text-emerald-300 block mx-auto uppercase tracking-wider mb-4"
-            >
-              Cambia Foto Profilo
-            </button>
-
-            <h2 className="text-xl font-bold text-white">{formData.fullName}</h2>
-            <p className="text-xs font-mono text-amber-400 font-bold mt-1 uppercase tracking-wider">
-              {formData.role}
-            </p>
-            <p className="text-xs text-gray-400 mt-0.5">{formData.organization}</p>
-
-            <div className="mt-6 pt-6 border-t border-[#1E293B] text-left space-y-3 text-xs font-mono">
-              <div className="flex justify-between">
-                <span className="text-gray-400">ID Utente:</span>
-                <span className="text-white font-bold">USR-2026-001</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-400">Stato Account:</span>
-                <span className="text-emerald-400 font-bold">Attivo</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-400">Ultimo Accesso:</span>
-                <span className="text-white">Oggi, 09:15:20</span>
-              </div>
-            </div>
+        {/* Sezione Foto Profilo con Upload */}
+        <div className="flex flex-col sm:flex-row items-center gap-6 pb-6 border-b border-[#1E293B]">
+          <div className="relative w-20 h-20 rounded-full overflow-hidden border-2 border-gray-700 bg-gray-900 shrink-0">
+            <img 
+              src={avatarUrl} 
+              alt="Avatar" 
+              className="w-full h-full object-cover"
+            />
           </div>
-
-          {/* Card Cambio Password */}
-          <div className="bg-[#0F172A] border border-[#1E293B] p-6 space-y-4">
-            <h3 className="text-sm font-bold uppercase tracking-wider text-gray-300 border-b border-[#1E293B] pb-2">
-              Sicurezza Account
-            </h3>
-
-            <form onSubmit={handlePasswordSubmit} className="space-y-3 pt-1">
-              {passwordError && (
-                <div className="p-2.5 bg-red-950/80 border border-red-800/80 text-red-300 text-xs font-bold">
-                  ⚠️ {passwordError}
-                </div>
-              )}
-
-              <div>
-                <label className="block text-[11px] font-bold text-gray-300 uppercase mb-1">
-                  Password Attuale
-                </label>
-                <input
-                  type="password"
-                  required
-                  value={passwordData.currentPassword}
-                  onChange={(e) => setPasswordData({ ...passwordData, currentPassword: e.target.value })}
-                  className="w-full bg-[#050B14] border border-[#1E293B] p-2 text-xs text-white focus:outline-none focus:border-emerald-500 font-sans"
-                  placeholder="••••••••"
+          <div className="space-y-2 w-full">
+            <label className="text-xs font-bold text-gray-200 uppercase tracking-wider block">Foto Profilo (Upload)</label>
+            <p className="text-[11px] text-gray-400">Carica un'immagine dal tuo dispositivo (PNG, JPG o WEBP).</p>
+            
+            <div className="flex items-center gap-3">
+              <label className="px-4 py-2 bg-[#1E293B] hover:bg-gray-700 border border-gray-700 text-gray-200 text-xs font-semibold rounded-none transition-all cursor-pointer inline-flex items-center gap-2">
+                {uploadingImage ? 'Caricamento in corso...' : 'Scegli File...'}
+                <input 
+                  type="file" 
+                  accept="image/*" 
+                  onChange={handleFileUpload} 
+                  disabled={uploadingImage}
+                  className="hidden" 
                 />
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-bold text-gray-300 uppercase mb-1">
-                  Nuova Password
-                </label>
-                <input
-                  type="password"
-                  required
-                  value={passwordData.newPassword}
-                  onChange={(e) => setPasswordData({ ...passwordData, newPassword: e.target.value })}
-                  className="w-full bg-[#050B14] border border-[#1E293B] p-2 text-xs text-white focus:outline-none focus:border-emerald-500 font-sans"
-                  placeholder="Minimo 8 caratteri"
-                />
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-bold text-gray-300 uppercase mb-1">
-                  Conferma Nuova Password
-                </label>
-                <input
-                  type="password"
-                  required
-                  value={passwordData.confirmPassword}
-                  onChange={(e) => setPasswordData({ ...passwordData, confirmPassword: e.target.value })}
-                  className="w-full bg-[#050B14] border border-[#1E293B] p-2 text-xs text-white focus:outline-none focus:border-emerald-500 font-sans"
-                  placeholder="Ripeti nuova password"
-                />
-              </div>
-
-              <div className="pt-2 flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
-                    setPasswordError('');
-                  }}
-                  className="flex-1 py-2 bg-[#1E293B] hover:bg-[#334155] border border-[#334155] text-xs font-bold text-gray-300 transition-all rounded-none"
-                >
-                  Annulla
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 py-2 bg-[#EA580C] hover:bg-[#C2410C] text-white font-bold text-xs uppercase tracking-wider transition-all rounded-none"
-                >
-                  Aggiorna
-                </button>
-              </div>
-            </form>
+              </label>
+              <span className="text-[11px] text-gray-400 truncate max-w-xs font-mono">{avatarUrl}</span>
+            </div>
           </div>
         </div>
 
-        {/* COLONNA DESTRA: Modulo Dettagli Personali */}
-        <div className="lg:col-span-2">
-          <form onSubmit={handleProfileSubmit} className="bg-[#0F172A] border border-[#1E293B] p-6 space-y-6">
-            <h3 className="text-sm font-bold uppercase tracking-wider text-gray-300 border-b border-[#1E293B] pb-2">
-              Dettagli Personali & Contatti
-            </h3>
+        {/* Informazioni Personali e Contatti */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pb-6 border-b border-[#1E293B]">
+          
+          <div className="space-y-2">
+            <label className="text-xs font-bold text-gray-300 uppercase tracking-wider">Nome Completo</label>
+            <input
+              type="text"
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+              className="w-full bg-[#050B14] border border-[#1E293B] px-3.5 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+              required
+            />
+          </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-bold text-gray-300 uppercase mb-1">
-                  Nome e Cognome
-                </label>
-                <input
-                  type="text"
-                  value={formData.fullName}
-                  onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
-                  className="w-full bg-[#050B14] border border-[#1E293B] p-2.5 text-sm text-white focus:outline-none focus:border-emerald-500 font-sans"
-                />
-              </div>
+          <div className="space-y-2">
+            <label className="text-xs font-bold text-gray-300 uppercase tracking-wider">Indirizzo Email</label>
+            <input
+              type="email"
+              value={email}
+              disabled
+              className="w-full bg-[#050B14]/50 border border-[#1E293B] px-3.5 py-2 text-xs text-gray-400 cursor-not-allowed"
+            />
+            <span className="text-[10px] text-gray-500 block">L'email di accesso non è modificabile.</span>
+          </div>
 
-              <div>
-                <label className="block text-xs font-bold text-gray-300 uppercase mb-1">
-                  Indirizzo Email
-                </label>
-                <input
-                  type="email"
-                  value={formData.email}
-                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                  className="w-full bg-[#050B14] border border-[#1E293B] p-2.5 text-sm text-white focus:outline-none focus:border-emerald-500 font-sans"
-                />
-              </div>
+          <div className="space-y-2">
+            <label className="text-xs font-bold text-gray-300 uppercase tracking-wider">Numero di Telefono</label>
+            <input
+              type="text"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              className="w-full bg-[#050B14] border border-[#1E293B] px-3.5 py-2 text-xs text-white focus:outline-none focus:border-emerald-500 font-mono"
+              placeholder="+39 ..."
+            />
+          </div>
 
-              <div>
-                <label className="block text-xs font-bold text-gray-300 uppercase mb-1">
-                  Ruolo Assegnato
-                </label>
-                <input
-                  type="text"
-                  disabled
-                  value={formData.role}
-                  className="w-full bg-[#1E293B]/50 border border-[#1E293B] p-2.5 text-sm text-gray-400 cursor-not-allowed font-sans"
-                />
-              </div>
+          <div className="space-y-2">
+            <label className="text-xs font-bold text-gray-300 uppercase tracking-wider">Ruolo di Sistema</label>
+            <input
+              type="text"
+              value={role}
+              disabled
+              className="w-full bg-[#050B14]/50 border border-[#1E293B] px-3.5 py-2 text-xs text-amber-400 font-bold uppercase cursor-not-allowed"
+            />
+          </div>
 
-              <div>
-                <label className="block text-xs font-bold text-gray-300 uppercase mb-1">
-                  Organizzazione / Ente
-                </label>
-                <input
-                  type="text"
-                  value={formData.organization}
-                  onChange={(e) => setFormData({ ...formData, organization: e.target.value })}
-                  className="w-full bg-[#050B14] border border-[#1E293B] p-2.5 text-sm text-white focus:outline-none focus:border-emerald-500 font-sans"
-                />
-              </div>
+          <div className="space-y-2 md:col-span-2">
+            <label className="text-xs font-bold text-gray-300 uppercase tracking-wider">Status Operativo</label>
+            <select
+              value={status}
+              onChange={(e) => setStatus(e.target.value as any)}
+              className="w-full bg-[#050B14] border border-[#1E293B] px-3.5 py-2 text-xs text-white focus:outline-none focus:border-emerald-500 font-medium"
+            >
+              <option value="Active">🟢 Attivo / Operativo</option>
+              <option value="Busy">🔴 Occupato / In Riunione</option>
+              <option value="Away">🟡 Assente / Fuori Sede</option>
+              <option value="Offline">⚪ Offline</option>
+            </select>
+          </div>
 
-              <div>
-                <label className="block text-xs font-bold text-gray-300 uppercase mb-1">
-                  Telefono di Contatto
-                </label>
-                <input
-                  type="text"
-                  value={formData.phone}
-                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                  className="w-full bg-[#050B14] border border-[#1E293B] p-2.5 text-sm text-white focus:outline-none focus:border-emerald-500 font-sans"
-                />
-              </div>
+        </div>
 
-              <div>
-                <label className="block text-xs font-bold text-gray-300 uppercase mb-1">
-                  Sede / Ubicazione
-                </label>
-                <input
-                  type="text"
-                  value={formData.location}
-                  onChange={(e) => setFormData({ ...formData, location: e.target.value })}
-                  className="w-full bg-[#050B14] border border-[#1E293B] p-2.5 text-sm text-white focus:outline-none focus:border-emerald-500 font-sans"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-gray-300 uppercase mb-1">
-                Profilo Professionale / Note
-              </label>
-              <textarea
-                rows={3}
-                value={formData.bio}
-                onChange={(e) => setFormData({ ...formData, bio: e.target.value })}
-                className="w-full bg-[#050B14] border border-[#1E293B] p-2.5 text-sm text-white focus:outline-none focus:border-emerald-500 font-sans"
+        {/* Contatto di Emergenza */}
+        <div className="space-y-4 pb-6 border-b border-[#1E293B]">
+          <h3 className="text-xs font-extrabold text-emerald-400 uppercase tracking-wider">Contatto di Emergenza</h3>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-bold text-gray-300 uppercase">Nome Contatto di Emergenza</label>
+              <input
+                type="text"
+                value={emergencyContactName}
+                onChange={(e) => setEmergencyContactName(e.target.value)}
+                className="w-full bg-[#050B14] border border-[#1E293B] px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                placeholder="Es. Nome Cognome"
               />
             </div>
 
-            {/* Pulsanti di Azione */}
-            <div className="pt-4 border-t border-[#1E293B] flex justify-end gap-3">
-              <Link
-                href="/admin"
-                className="px-4 py-2.5 bg-[#1E293B] hover:bg-[#334155] border border-[#334155] text-xs font-bold text-gray-300 transition-all rounded-none"
-              >
-                Annulla
-              </Link>
-              <button
-                type="submit"
-                className="px-6 py-2.5 bg-[#EA580C] hover:bg-[#C2410C] text-white font-bold text-xs uppercase tracking-wider transition-all rounded-none"
-              >
-                Salva Modifiche
-              </button>
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-bold text-gray-300 uppercase">Telefono di Emergenza</label>
+              <input
+                type="text"
+                value={emergencyContactPhone}
+                onChange={(e) => setEmergencyContactPhone(e.target.value)}
+                className="w-full bg-[#050B14] border border-[#1E293B] px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500 font-mono"
+                placeholder="+39 ..."
+              />
             </div>
-          </form>
+          </div>
         </div>
 
-      </div>
+        {/* Indirizzo Completo */}
+        <div className="space-y-4">
+          <h3 className="text-xs font-extrabold text-emerald-400 uppercase tracking-wider">Indirizzo Completo</h3>
+          
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="space-y-1.5 md:col-span-2">
+              <label className="text-[11px] font-bold text-gray-300 uppercase">Via / Piazza</label>
+              <input
+                type="text"
+                value={addressStreet}
+                onChange={(e) => setAddressStreet(e.target.value)}
+                className="w-full bg-[#050B14] border border-[#1E293B] px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                placeholder="Es. Via Dante Alighieri"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-bold text-gray-300 uppercase">Numero Civico</label>
+              <input
+                type="text"
+                value={addressNumber}
+                onChange={(e) => setAddressNumber(e.target.value)}
+                className="w-full bg-[#050B14] border border-[#1E293B] px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                placeholder="Es. 14"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-bold text-gray-300 uppercase">Codice Postale (CAP)</label>
+              <input
+                type="text"
+                value={addressPostalCode}
+                onChange={(e) => setAddressPostalCode(e.target.value)}
+                className="w-full bg-[#050B14] border border-[#1E293B] px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500 font-mono"
+                placeholder="Es. 09128"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-bold text-gray-300 uppercase">Città</label>
+              <input
+                type="text"
+                value={addressCity}
+                onChange={(e) => setAddressCity(e.target.value)}
+                className="w-full bg-[#050B14] border border-[#1E293B] px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                placeholder="Es. Cagliari"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-bold text-gray-300 uppercase">Regione</label>
+              <input
+                type="text"
+                value={addressRegion}
+                onChange={(e) => setAddressRegion(e.target.value)}
+                className="w-full bg-[#050B14] border border-[#1E293B] px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                placeholder="Es. Sardegna"
+              />
+            </div>
+
+            <div className="space-y-1.5 md:col-span-3">
+              <label className="text-[11px] font-bold text-gray-300 uppercase">Stato</label>
+              <input
+                type="text"
+                value={addressCountry}
+                onChange={(e) => setAddressCountry(e.target.value)}
+                className="w-full bg-[#050B14] border border-[#1E293B] px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                placeholder="Es. Italia"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Pulsante di Salvataggio */}
+        <div className="flex justify-end pt-4 border-t border-[#1E293B]">
+          <button
+            type="submit"
+            disabled={saving || uploadingImage}
+            className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold uppercase tracking-wider transition-all cursor-pointer disabled:opacity-50"
+          >
+            {saving ? 'Salvataggio in corso...' : 'Salva Modifiche'}
+          </button>
+        </div>
+
+      </form>
+
     </div>
   );
 }
