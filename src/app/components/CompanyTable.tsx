@@ -1,8 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-// ... resto degli import e del codice
-
 import Link from 'next/link';
 import AnagraficaForm from './AnagraficaForm';
 
@@ -24,6 +22,7 @@ interface CompanyTableProps {
   subtitle?: string;
   showRegisterButton?: boolean;
   fromPath?: string;
+  onCompanyAdded?: () => void;
 }
 
 export function CompanyTable({
@@ -31,7 +30,8 @@ export function CompanyTable({
   title = 'CONTROLLO AZIENDE',
   subtitle = 'Panoramica di tutte le aziende inserite nel database.',
   showRegisterButton = true,
-  fromPath = 'admin'
+  fromPath = 'admin',
+  onCompanyAdded
 }: CompanyTableProps) {
   const [isRegistering, setIsRegistering] = useState(false);
 
@@ -42,8 +42,13 @@ export function CompanyTable({
       {isRegistering ? (
         <AnagraficaForm
           onSave={(newCompany) => {
-            console.log('Nuova azienda salvata:', newCompany);
+            console.log('Azienda registrata in locale:', newCompany);
             setIsRegistering(false);
+            if (onCompanyAdded) {
+              onCompanyAdded();
+            } else {
+              window.location.reload(); // Aggiorna subito la pagina locale per mostrare la nuova azienda
+            }
           }}
           onCancel={() => setIsRegistering(false)}
         />

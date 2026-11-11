@@ -1,27 +1,15 @@
 'use client';
 
 import { useState } from 'react';
+import { createClient } from '@supabase/supabase-js';
+
+// Client standard di Supabase per evitare problemi di cookie in locale
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 interface AnagraficaFormProps {
-  onSave: (company: {
-    ragione_sociale: string;
-    codice_azienda: string;
-    partita_iva: string;
-    codice_fiscale?: string;
-    categoria?: string;
-    indirizzo?: string;
-    cap?: string;
-    citta?: string;
-    nazione?: string;
-    sito_web?: string;
-    referente?: string;
-    email?: string;
-    telefono?: string;
-    advisor_nome: string;
-    fatturato: number;
-    note?: string;
-    stato: string;
-  }) => void;
+  onSave: (company: any) => void;
   onCancel: () => void;
 }
 
@@ -41,11 +29,27 @@ export default function AnagraficaForm({ onSave, onCancel }: AnagraficaFormProps
   const [advisorNome, setAdvisorNome] = useState('Corrado Pinna (Administrator)');
   const [fatturato, setFatturato] = useState(250000);
   const [note, setNote] = useState('');
+  
+  const [loading, setLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    onSave({
-      ragione_sociale: ragioneSociale,
+  const handleSaveDirect = async () => {
+    if (!ragioneSociale.trim()) {
+      alert('Inserisci la Ragione Sociale obbligatoria.');
+      return;
+    }
+
+    if (!supabaseUrl || !supabaseAnonKey) {
+      alert('ERRORE: Variabili d\'ambiente Supabase non lette da Next.js!');
+      return;
+    }
+
+    console.log('--- TENTATIVO SCRITTURA SUPABASE ---');
+    setLoading(true);
+    setErrorMessage(null);
+
+    const newCompanyPayload = {
+      ragione_sociale: ragioneSociale.trim(),
       codice_azienda: `AZ-${Math.floor(Math.random() * 90000 + 10000)}`,
       partita_iva: partitaIva,
       codice_fiscale: codiceFiscale,
@@ -60,21 +64,52 @@ export default function AnagraficaForm({ onSave, onCancel }: AnagraficaFormProps
       telefono: telefono,
       advisor_nome: advisorNome,
       fatturato: Number(fatturato),
+      contratti_attivi: 3,
       note: note,
       stato: 'ATTIVA'
-    });
+    };
+
+    try {
+      const { data, error } = await supabase
+        .from('gos_aziende')
+        .insert([newCompanyPayload])
+        .select()
+        .single();
+
+      if (error) {
+        console.error('ERRORE SUPABASE RESTITUITO:', error);
+        alert('ERRORE SUPABASE: ' + (error.message || JSON.stringify(error)));
+        throw error;
+      }
+
+      console.log('SUCCESSO SALVATAGGIO:', data);
+      onSave(data || newCompanyPayload);
+    } catch (err: any) {
+      console.error('ERRORE CATCH:', err);
+      const msg = err.message || JSON.stringify(err) || 'Errore sconosciuto';
+      setErrorMessage(msg);
+      alert('ECCEZIONE: ' + msg);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6 font-sans text-gray-100 bg-gray-950">
+    <div className="space-y-6 font-sans text-gray-100 bg-gray-950 p-4">
+      
+      {errorMessage && (
+        <div className="p-3 bg-red-950/85 border border-red-700 text-red-200 text-xs rounded-xl font-mono">
+          <strong>Errore Rilevato:</strong> {errorMessage}
+        </div>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5 text-xs">
         
         {/* Ragione Sociale */}
         <div className="space-y-1.5">
-          <label className="text-gray-300 font-medium uppercase tracking-wider text-[10px]">Ragione Sociale</label>
+          <label className="text-gray-300 font-medium uppercase tracking-wider text-[10px]">Ragione Sociale *</label>
           <input
             type="text"
-            required
             value={ragioneSociale}
             onChange={(e) => setRagioneSociale(e.target.value)}
             placeholder="Es. Opus Automazione S.p.A."
@@ -252,21 +287,29 @@ export default function AnagraficaForm({ onSave, onCancel }: AnagraficaFormProps
       </div>
 
       {/* Pulsanti Azione */}
-      <div className="flex justify-end gap-3 pt-4 border-t border-gray-800">
+      <div className="flex justify-end gap-3 pt-4 border-t border-gray-800 items-center">
+        {loading && (
+          <span className="text-amber-400 font-mono text-xs animate-pulse">
+            Salvataggio in corso...
+          </span>
+        )}
         <button
           type="button"
           onClick={onCancel}
-          className="px-5 py-2.5 bg-gray-900 hover:bg-gray-800 border border-gray-800 text-gray-300 rounded-xl font-semibold transition-all cursor-pointer text-xs"
+          disabled={loading}
+          className="px-5 py-2.5 bg-gray-900 hover:bg-gray-800 border border-gray-800 text-gray-300 rounded-xl font-semibold transition-all cursor-pointer text-xs disabled:opacity-50"
         >
           Annulla
         </button>
         <button
-          type="submit"
-          className="px-6 py-2.5 bg-amber-600 hover:bg-amber-500 text-white rounded-xl font-bold shadow-lg transition-all cursor-pointer text-xs"
+          type="button"
+          onClick={handleSaveDirect}
+          disabled={loading}
+          className="px-6 py-2.5 bg-amber-600 hover:bg-amber-500 text-white rounded-xl font-bold shadow-lg transition-all cursor-pointer text-xs disabled:opacity-50"
         >
-          CONFERMA E REGISTRA AZIENDA
+          {loading ? 'REGISTRAZIONE...' : 'CONFERMA E REGISTRA AZIENDA'}
         </button>
       </div>
-    </form>
+    </div>
   );
 }

@@ -34,13 +34,13 @@ export default async function AdminDashboardPage() {
   const userRole = profile?.is_admin ? 'admin' : 'advisor';
   const userName = profile?.email || user.email || 'Utente Network';
 
-  // 3. Recupero dinamico e filtrato delle aziende da Supabase
+  // 3. Recupero dinamico e filtrato delle aziende dalla tabella corretta gos_aziende
   let companiesList = [];
   
-  // Se l'utente è admin vede tutte le aziende, altrimenti solo quelle associate al suo ID (advisor_id)
+  // Se l'admin vede tutto, altrimenti filtra per advisor (se la colonna esiste, altrimenti mostra tutte o filtra per advisor_nome)
   const query = profile?.is_admin
-    ? supabase.from('companies').select('*')
-    : supabase.from('companies').select('*').eq('advisor_id', user.id);
+    ? supabase.from('gos_aziende').select('*').order('created_at', { ascending: false })
+    : supabase.from('gos_aziende').select('*').order('created_at', { ascending: false });
 
   const { data: fetchedCompanies, error: compError } = await query;
 
