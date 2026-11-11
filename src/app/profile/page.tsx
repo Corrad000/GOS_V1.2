@@ -153,7 +153,7 @@ export default function ProfilePage() {
       {/* Breadcrumb di Navigazione */}
       <nav className="flex items-center gap-2 text-xs text-gray-400">
         <Link 
-          href="/admin" 
+          href="/dashboard" 
           className="hover:text-white transition-colors flex items-center gap-1.5"
         >
           <span>←</span> Torna alla Dashboard
