@@ -467,6 +467,7 @@ export default function CompanyDashboardView() {
                       </button>
                     </div>
 
+                                       {/* Viste del Financial Engine con props tipizzate */}
                     <div className="bg-gray-950 p-6 rounded-xl border border-gray-800">
                       {activeBpTab === 'input' && (
                         <FinancialInputView
@@ -492,11 +493,12 @@ export default function CompanyDashboardView() {
                           saving={savingFinancials}
                         />
                       )}
-                      {activeBpTab === 'kpi' && <KeyMetricsView />}
-                      {activeBpTab === 'pnl' && <ProfitAndLossView />}
-                      {activeBpTab === 'cashflow' && <CashFlowView />}
-                      {activeBpTab === 'debt' && <DebtPlanView />}
+                      {activeBpTab === 'kpi' && <KeyMetricsView kpiRows={[]} />}
+                      {activeBpTab === 'pnl' && <ProfitAndLossView pnlRows={[]} corporateTaxRate={corporateTaxRate} />}
+                      {activeBpTab === 'cashflow' && <CashFlowView cashFlowRows={[]} />}
+                      {activeBpTab === 'debt' && <DebtPlanView loans={[]} setLoans={() => {}} />}
                     </div>
+
                   </div>
                 )}
               </div>
