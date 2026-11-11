@@ -27,18 +27,21 @@ export default function HomePage() {
 
     try {
       if (isSignUp) {
-        // REGISTRAZIONE NUOVO UTENTE
+        // REGISTRAZIONE NUOVO UTENTE CON CONFERMA EMAIL
         const { error } = await supabase.auth.signUp({
           email,
           password,
           options: {
             data: { full_name: fullName },
+            emailRedirectTo: `${window.location.origin}/auth/callback`,
           },
         });
 
         if (error) throw error;
 
-        setSuccessMsg('Registrazione completata! Effettua ora il login.');
+        setSuccessMsg(
+          "Registrazione effettuata con successo! Ti abbiamo inviato un email di conferma. Clicca sul link ricevuto per attivare il tuo account."
+        );
         setIsSignUp(false);
       } else {
         // LOGIN UTENTE ESISTENTE
@@ -54,7 +57,11 @@ export default function HomePage() {
       }
     } catch (err: any) {
       console.error('Errore autenticazione:', err.message);
-      setErrorMsg(err.message === 'Invalid login credentials' ? 'Credenziali non valide. Verifica email e password.' : err.message);
+      if (err.message === 'Invalid login credentials') {
+        setErrorMsg('Credenziali non valide o email non ancora confermata.');
+      } else {
+        setErrorMsg(err.message || "Errore durante l'operazione.");
+      }
     } finally {
       setLoading(false);
     }
@@ -64,7 +71,7 @@ export default function HomePage() {
     <main className="min-h-screen bg-gray-950 text-gray-100 font-sans flex flex-col items-center justify-center p-6">
       <div className="max-w-md w-full space-y-8 bg-gray-900 border border-gray-800 p-8 rounded-2xl shadow-2xl">
         
-        {/* Header */}
+        {/* Header Identità GOS */}
         <div className="text-center space-y-2">
           <span className="text-[10px] font-mono font-bold tracking-widest text-amber-500 uppercase px-3 py-1 bg-amber-950/40 border border-amber-800/50 rounded-full inline-block">
             GOS-V1.2 · Glaring Operating System
@@ -77,26 +84,28 @@ export default function HomePage() {
           </p>
         </div>
 
+        {/* Notifica Errore */}
         {errorMsg && (
-          <div className="p-3 bg-red-950/60 border border-red-800 rounded-xl text-xs text-red-400 text-center">
+          <div className="p-3 bg-red-950/60 border border-red-800 rounded-xl text-xs text-red-400 text-center font-medium">
             {errorMsg}
           </div>
         )}
 
+        {/* Notifica Successo / Conferma Email */}
         {successMsg && (
-          <div className="p-3 bg-emerald-950/60 border border-emerald-800 rounded-xl text-xs text-emerald-300 text-center">
+          <div className="p-3 bg-emerald-950/60 border border-emerald-800 rounded-xl text-xs text-emerald-300 text-center font-medium">
             {successMsg}
           </div>
         )}
 
-        {/* Form */}
+        {/* Form di Autenticazione */}
         <form onSubmit={handleSubmit} className="space-y-5">
           {isSignUp && (
             <div>
               <label className="block text-gray-400 mb-1 font-bold uppercase text-[10px]">Nome Completo</label>
               <input
                 type="text"
-                placeholder="Nome Cognome"
+                placeholder="Mario Rossi"
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
                 className="w-full bg-gray-950 border border-gray-700 px-3.5 py-3 rounded-xl text-white text-xs focus:outline-none focus:border-amber-500"
@@ -138,7 +147,7 @@ export default function HomePage() {
           </button>
         </form>
 
-        {/* Selettore Login / Registrazione */}
+        {/* Switch Login / Registrazione */}
         <div className="text-center pt-2">
           <button
             type="button"
@@ -153,6 +162,7 @@ export default function HomePage() {
           </button>
         </div>
 
+        {/* Footer Minimal */}
         <div className="text-center pt-4 border-t border-gray-800 text-[10px] font-mono text-gray-500">
           Glaring LLP · Sicurezza e crittografia attiva
         </div>
