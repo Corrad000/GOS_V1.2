@@ -10,6 +10,35 @@ import { CashFlowView, CashFlowRowData } from '@/modules/financial-engine/CashFl
 import { DebtPlanView, LoanItem } from '@/modules/financial-engine/DebtPlanView';
 import { businessReportService } from '@/services/pdf/businessReportService';
 
+// Componente selettore di stato integrato (Bozza / Attivo / Chiuso)
+type EntityStatus = 'Bozza' | 'Attivo' | 'Chiuso';
+
+function ProjectStatusSelect({ status, onChange }: { status: EntityStatus; onChange: (newStatus: EntityStatus) => void }) {
+  const getBadgeStyle = (currentStatus: EntityStatus) => {
+    switch (currentStatus) {
+      case 'Attivo':
+        return 'bg-emerald-950 border-emerald-800 text-emerald-300';
+      case 'Chiuso':
+        return 'bg-gray-900 border-gray-700 text-gray-400';
+      case 'Bozza':
+      default:
+        return 'bg-amber-950 border-amber-800 text-amber-300';
+    }
+  };
+
+  return (
+    <select
+      value={status}
+      onChange={(e) => onChange(e.target.value as EntityStatus)}
+      className={`px-3 py-1 border text-xs font-semibold rounded-lg uppercase cursor-pointer focus:outline-none transition-all hover:opacity-80 ${getBadgeStyle(status)}`}
+    >
+      <option value="Bozza" className="bg-gray-900 text-amber-300">Bozza</option>
+      <option value="Attivo" className="bg-gray-900 text-emerald-300">Attivo</option>
+      <option value="Chiuso" className="bg-gray-900 text-gray-400">Chiuso</option>
+    </select>
+  );
+}
+
 export default function ProjectDetailView() {
   const router = useRouter();
   const params = useParams();
@@ -28,7 +57,7 @@ export default function ProjectDetailView() {
   const [projectData, setProjectData] = useState<any>({
     titolo: 'Caricamento in corso...',
     descrizione: '',
-    stato: 'Bozza',
+    stato: 'Attivo',
     codice_progetto: 'PRJ-001'
   });
 
@@ -115,6 +144,19 @@ export default function ProjectDetailView() {
     loadProjectDetails();
   }, [projectId, supabase]);
 
+  // Gestione aggiornamento stato con salvataggio su Supabase
+  const handleStatusChange = async (newStatus: EntityStatus) => {
+    setProjectData((prev: any) => ({ ...prev, stato: newStatus }));
+    try {
+      await supabase
+        .from('gos_progetti')
+        .update({ stato: newStatus })
+        .eq('id', projectId);
+    } catch (err) {
+      console.error('Errore aggiornamento stato su database:', err);
+    }
+  };
+
   const handleSaveAll = () => {
     setSaving(true);
     setTimeout(() => {
@@ -123,7 +165,6 @@ export default function ProjectDetailView() {
     }, 600);
   };
 
-  // Calcolo dinamico del piano di ammortamento per il servizio PDF
   const calculateDebtScheduleForPDF = () => {
     const years = [1, 2, 3, 4, 5];
     return years.map((y) => {
@@ -166,7 +207,6 @@ export default function ProjectDetailView() {
     try {
       setGeneratingPdf(true);
 
-      // Mappatura dati per il servizio printBusinessPlanReport
       const bpData = {
         kpis: kpiRows.map(k => ({
           label: k.label,
@@ -223,9 +263,11 @@ export default function ProjectDetailView() {
               <span className="px-3 py-1 bg-gray-900 border border-gray-800 text-[#FF5500] font-mono text-xs font-bold rounded-lg uppercase">
                 PROJ
               </span>
-              <span className="px-3 py-1 bg-emerald-950 border border-emerald-800 text-emerald-300 text-xs font-semibold rounded-lg uppercase">
-                {projectData.stato}
-              </span>
+              {/* Selettore a tendina dello stato integrato */}
+              <ProjectStatusSelect
+                status={projectData.stato || 'Attivo'}
+                onChange={handleStatusChange}
+              />
             </div>
             <h1 className="text-3xl font-extrabold text-white uppercase tracking-tight">
               {projectData.titolo}
