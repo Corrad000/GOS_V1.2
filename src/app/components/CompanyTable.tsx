@@ -47,7 +47,7 @@ export function CompanyTable({
             if (onCompanyAdded) {
               onCompanyAdded();
             } else {
-              window.location.reload(); // Aggiorna subito la pagina locale per mostrare la nuova azienda
+              window.location.reload();
             }
           }}
           onCancel={() => setIsRegistering(false)}
@@ -87,39 +87,45 @@ export function CompanyTable({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-800">
-                  {companies.map((c) => (
-                    <tr key={c.id} className="hover:bg-gray-850/50 transition-colors">
-                      <td className="p-4">
-                        <div className="font-bold text-white text-sm">{c.ragione_sociale}</div>
-                        <div className="text-[10px] font-mono text-amber-400">{c.codice_azienda || c.id}</div>
-                      </td>
-                      <td className="p-4">
-                        <div className="font-semibold text-white">{c.advisor_nome || 'Corrado Pinna'}</div>
-                        <div className="text-[10px] text-gray-400">{c.advisor_ruolo || 'Administrator'}</div>
-                      </td>
-                      <td className="p-4 font-mono font-bold text-emerald-400 text-sm">
-                        € {Number(c.fatturato || 250000).toLocaleString('it-IT')}
-                      </td>
-                      <td className="p-4">
-                        <span className="px-2.5 py-1 bg-gray-800 border border-gray-700 text-gray-200 rounded-lg text-[10px] font-bold font-mono">
-                          {c.contratti_attivi || 3} Attivi
-                        </span>
-                      </td>
-                      <td className="p-4">
-                        <span className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase bg-emerald-950 text-emerald-300 border border-emerald-800">
-                          {c.stato || 'ATTIVA'}
-                        </span>
-                      </td>
-                      <td className="p-4 text-right">
-                        <Link
-                          href={`/aziende/${c.id}`}
-                          className="px-3.5 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-200 rounded-lg text-xs font-semibold transition-all inline-block cursor-pointer"
-                        >
-                          Dettagli
-                        </Link>
-                      </td>
-                    </tr>
-                  ))}
+                  {companies.map((c) => {
+                    // Lettura pulita dei dati reali senza forzature fittizie
+                    const fatturatoVal = Number(c.fatturato ?? (c as any).revenue ?? 0);
+                    const contrattiVal = Number(c.contratti_attivi ?? 0);
+
+                    return (
+                      <tr key={c.id} className="hover:bg-gray-850/50 transition-colors">
+                        <td className="p-4">
+                          <div className="font-bold text-white text-sm">{c.ragione_sociale}</div>
+                          <div className="text-[10px] font-mono text-amber-400">{c.codice_azienda || c.id}</div>
+                        </td>
+                        <td className="p-4">
+                          <div className="font-semibold text-white">{c.advisor_nome || 'Corrado Pinna'}</div>
+                          <div className="text-[10px] text-gray-400">{c.advisor_ruolo || 'Administrator'}</div>
+                        </td>
+                        <td className="p-4 font-mono font-bold text-emerald-400 text-sm">
+                          € {fatturatoVal.toLocaleString('it-IT')}
+                        </td>
+                        <td className="p-4">
+                          <span className="px-2.5 py-1 bg-gray-800 border border-gray-700 text-gray-200 rounded-lg text-[10px] font-bold font-mono">
+                            {contrattiVal} Attivi
+                          </span>
+                        </td>
+                        <td className="p-4">
+                          <span className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase bg-emerald-950 text-emerald-300 border border-emerald-800">
+                            {c.stato || 'ATTIVA'}
+                          </span>
+                        </td>
+                        <td className="p-4 text-right">
+                          <Link
+                            href={`/aziende/${c.id}`}
+                            className="px-3.5 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-200 rounded-lg text-xs font-semibold transition-all inline-block cursor-pointer"
+                          >
+                            Dettagli
+                          </Link>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

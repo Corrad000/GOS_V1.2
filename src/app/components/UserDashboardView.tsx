@@ -107,7 +107,7 @@ export function UserDashboardView({ userRole, userName, companies }: UserDashboa
           .from('gos_moduli')
           .select('*')
           .eq('categoria_id', selectedCategory.id)
-          .is('company_code', null); // Carica solo i moduli master di libreria
+          .is('company_code', null);
 
         if (error) throw error;
         setModules(data || []);
@@ -146,7 +146,6 @@ export function UserDashboardView({ userRole, userName, companies }: UserDashboa
     }
   };
 
-  // Apertura Modale Modifica Categoria
   const handleOpenEditCategory = (cat: any, e: React.MouseEvent) => {
     e.stopPropagation();
     setEditingCategory(cat);
@@ -155,7 +154,6 @@ export function UserDashboardView({ userRole, userName, companies }: UserDashboa
     setShowEditCategoryModal(true);
   };
 
-  // Salvataggio Modifica Categoria
   const handleUpdateCategory = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingCategory || !editCategoryName.trim()) return;
@@ -180,7 +178,6 @@ export function UserDashboardView({ userRole, userName, companies }: UserDashboa
     }
   };
 
-  // Eliminazione Categoria Master
   const handleDeleteCategory = async (catId: string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (!confirm('Sei sicuro di voler eliminare questa categoria e tutti i moduli associati?')) return;
@@ -200,7 +197,6 @@ export function UserDashboardView({ userRole, userName, companies }: UserDashboa
     }
   };
 
-  // Creazione Modulo Master
   const handleCreateModule = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTitle || !selectedCategory || !newDomanda) return;
@@ -213,7 +209,7 @@ export function UserDashboardView({ userRole, userName, companies }: UserDashboa
         .insert([
           {
             categoria_id: selectedCategory.id,
-            company_code: null, // Modulo master di libreria
+            company_code: null,
             codice_modulo: codiceModulo,
             titolo: newTitle,
             descrizione: 'Creato da libreria master GOS',
@@ -250,7 +246,6 @@ export function UserDashboardView({ userRole, userName, companies }: UserDashboa
     }
   };
 
-  // Eliminazione Modulo Master
   const handleDeleteModule = async (modId: string) => {
     if (!confirm('Sei sicuro di voler eliminare questo modulo?')) return;
 
@@ -264,6 +259,9 @@ export function UserDashboardView({ userRole, userName, companies }: UserDashboa
       alert('Errore durante l\'eliminazione del modulo: ' + (err.message || err));
     }
   };
+
+  // Calcolo reale del fatturato totale sommando il campo fatturato di ogni azienda
+  const totalPortfolioRevenue = companies.reduce((acc, c: any) => acc + Number(c.fatturato || c.revenue || 0), 0);
 
   return (
     <div className="space-y-6">
@@ -291,9 +289,9 @@ export function UserDashboardView({ userRole, userName, companies }: UserDashboa
           </div>
 
           <div className="bg-gray-950 border border-gray-800 rounded-xl p-4 space-y-1">
-            <span className="text-[10px] font-mono font-bold uppercase text-gray-400 tracking-wider">Fatturato Pipeline</span>
+            <span className="text-[10px] font-mono font-bold uppercase text-gray-400 tracking-wider">Fatturato Totale Portfolio</span>
             <div className="text-lg font-black text-emerald-400 font-mono">
-              € {companies.length * 12500}
+              € {totalPortfolioRevenue.toLocaleString('it-IT')}
             </div>
           </div>
 
