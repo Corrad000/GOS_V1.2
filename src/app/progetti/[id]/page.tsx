@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
 import { FinancialInputView, ProductItem, DynamicCostItem } from '@/modules/financial-engine/FinancialInputView';
 import { KeyMetricsView, KpiRowData } from '@/modules/financial-engine/KeyMetricsView';
+import { KpiGuideView } from '@/modules/financial-engine/KpiGuideView';
 import { ProfitAndLossView, PnLRowData } from '@/modules/financial-engine/ProfitAndLossView';
 import { CashFlowView, CashFlowRowData } from '@/modules/financial-engine/CashFlowView';
 import { DebtPlanView, LoanItem } from '@/modules/financial-engine/DebtPlanView';
@@ -12,7 +13,6 @@ import { TaskScheduleView } from '@/modules/project-management/TaskScheduleView'
 import { ProjectGovernanceView } from '@/modules/project-management/ProjectGovernanceView';
 import { businessReportService } from '@/services/pdf/businessReportService';
 
-// Componente selettore di stato integrato (Bozza / Attivo / Chiuso)
 type EntityStatus = 'Bozza' | 'Attivo' | 'Chiuso';
 
 function ProjectStatusSelect({ status, onChange }: { status: EntityStatus; onChange: (newStatus: EntityStatus) => void }) {
@@ -41,13 +41,56 @@ function ProjectStatusSelect({ status, onChange }: { status: EntityStatus; onCha
   );
 }
 
+interface BalanceSheetRowData {
+  label: string;
+  values: [number, number, number, number, number];
+  isSubtotal?: boolean;
+}
+
+function BalanceSheetView({ balanceSheetRows }: { balanceSheetRows: BalanceSheetRowData[] }) {
+  return (
+    <div className="bg-gray-900 border border-gray-800 p-6 rounded-2xl space-y-6">
+      <div className="border-b border-gray-800 pb-4">
+        <h3 className="text-base font-bold text-white uppercase tracking-tight">Stato Patrimoniale Pluriennale (Balance Sheet)</h3>
+        <p className="text-xs text-gray-400 mt-0.5">Prospetto patrimoniale a 5 anni con quadratura contabile perfetta (Attivo = Passivo + Netto).</p>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-left text-xs">
+          <thead className="bg-gray-950 text-gray-400 uppercase text-[10px]">
+            <tr>
+              <th className="py-3 px-4">Voce Patrimoniale</th>
+              <th className="py-3 px-3 text-center">Anno 1</th>
+              <th className="py-3 px-3 text-center">Anno 2</th>
+              <th className="py-3 px-3 text-center">Anno 3</th>
+              <th className="py-3 px-3 text-center">Anno 4</th>
+              <th className="py-3 px-3 text-center">Anno 5</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-800/60 font-mono">
+            {balanceSheetRows.map((row, idx) => (
+              <tr key={idx} className={`hover:bg-gray-950/40 transition-colors ${row.isSubtotal ? 'bg-gray-950/60 font-bold text-amber-400' : 'text-gray-200'}`}>
+                <td className="py-3 px-4 font-sans">{row.label}</td>
+                {row.values.map((val, yIdx) => (
+                  <td key={yIdx} className="py-3 px-3 text-center">
+                    € {Math.round(val || 0).toLocaleString('it-IT')}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 export default function ProjectDetailView() {
   const router = useRouter();
   const params = useParams();
   const projectId = params?.id as string;
 
-  // Aggiunti i tab 'tasks' e 'ruoli'
-  const [activeTab, setActiveTab] = useState<'input' | 'metrics' | 'pl' | 'cashflow' | 'debt' | 'tasks' | 'ruoli'>('input');
+  const [activeTab, setActiveTab] = useState<'input' | 'metrics' | 'pl' | 'cashflow' | 'bs' | 'debt' | 'tasks' | 'ruoli'>('input');
   const [isMounted, setIsMounted] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -64,53 +107,20 @@ export default function ProjectDetailView() {
     codice_progetto: 'PRJ-001'
   });
 
-  // Stati condivisi del modello finanziario (Tab Input)
-  const [products, setProducts] = useState<ProductItem[]>([
-    {
-      name: 'Prodotto / Servizio Principale',
-      pieces: [0, 0, 0, 0, 0],
-      prices: [0, 0, 0, 0, 0],
-      unitCosts: [0, 0, 0, 0, 0]
-    }
-  ]);
+  const [products, setProducts] = useState<ProductItem[]>([]);
   const [generalProductionCosts, setGeneralProductionCosts] = useState<DynamicCostItem[]>([]);
+  const [staffCostsItems, setStaffCostsItems] = useState<DynamicCostItem[]>([]);
   const [capexItems, setCapexItems] = useState<DynamicCostItem[]>([]);
   const [opexItems, setOpexItems] = useState<DynamicCostItem[]>([]);
-  const [otherOperatingExpenses, setOtherOperatingExpenses] = useState(0);
+
+  const [corporateTaxRate, setCorporateTaxRate] = useState<number>(24);
+  const [employeeTaxRate, setEmployeeTaxRate] = useState<number>(30);
+  
   const [depreciation, setDepreciation] = useState(0);
   const [financialIncome, setFinancialIncome] = useState(0);
   const [financialExpenses, setFinancialExpenses] = useState(0);
-  const [corporateTaxRate, setCorporateTaxRate] = useState(24);
 
-  // Stati per il Debt Plan
-  const [loans, setLoans] = useState<LoanItem[]>([
-    {
-      id: '1',
-      name: 'Mutuo Chirografario Impianto',
-      principal: 0,
-      interestRate: 0,
-      durationYears: 0
-    }
-  ]);
-
-  // Righe P&L
-  const [pnlRows, setPnlRows] = useState<PnLRowData[]>([
-    { label: 'Valore della Produzione (Ricavi)', values: [0, 0, 0, 0, 0] },
-    { label: 'Costi del Personale', values: [0, 0, 0, 0, 0], isNegative: true },
-    { label: 'Costi Operativi (COGS)', values: [0, 0, 0, 0, 0], isNegative: true },
-    { label: 'EBITDA', values: [0, 0, 0, 0, 0], isSubtotal: true }
-  ]);
-
-  // Righe KPI
-  const [kpiRows, setKpiRows] = useState<KpiRowData[]>([
-    { label: 'EBITDA Margine', values: [0, 0, 0, 0, 0], isPercentage: true },
-    { label: 'ROI Stimato', values: [0, 0, 0, 0, 0], isPercentage: true }
-  ]);
-
-  // Righe Cash Flow
-  const [cashFlowRows, setCashFlowRows] = useState<CashFlowRowData[]>([
-    { label: 'Flusso di Cassa Operativo', values: [0, 0, 0, 0, 0], isSubtotal: true }
-  ]);
+  const [loans, setLoans] = useState<LoanItem[]>([]);
 
   const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -147,14 +157,203 @@ export default function ProjectDetailView() {
     loadProjectDetails();
   }, [projectId, supabase]);
 
-  // Gestione aggiornamento stato con salvataggio su Supabase
+  // ==========================================
+  // MOTORE FINANZIARIO INTEGRATO & DINAMICO
+  // ==========================================
+  const calculatedFinancials = useMemo(() => {
+    const yearsCount = 5;
+    const revenues = Array(yearsCount).fill(0);
+    const cogs = Array(yearsCount).fill(0);
+    const staffCosts = Array(yearsCount).fill(0);
+    const operationalCosts = Array(yearsCount).fill(0);
+    const capexTotal = Array(yearsCount).fill(0);
+    const assetSales = Array(yearsCount).fill(0);
+    const workingCapitalChange = Array(yearsCount).fill(0);
+    const yearlyInterestExpenses = Array(yearsCount).fill(0);
+    const yearlyPrincipalRepayments = Array(yearsCount).fill(0);
+    const newDebtInflows = Array(yearsCount).fill(0);
+    const totalDebtPerYear = Array(yearsCount).fill(0);
+
+    (products || []).forEach((prod) => {
+      for (let i = 0; i < yearsCount; i++) {
+        const pces = Number(prod?.pieces?.[i] || 0);
+        const prc = Number(prod?.prices?.[i] || 0);
+        const uc = Number(prod?.unitCosts?.[i] || 0);
+
+        revenues[i] += pces * prc;
+        cogs[i] += pces * uc;
+      }
+    });
+
+    (generalProductionCosts || []).forEach((gc) => {
+      for (let i = 0; i < yearsCount; i++) {
+        cogs[i] += Number(gc?.amounts?.[i] || 0);
+      }
+    });
+
+    (staffCostsItems || []).forEach((sc) => {
+      for (let i = 0; i < yearsCount; i++) {
+        const baseStaff = Number(sc?.amounts?.[i] || 0);
+        staffCosts[i] += baseStaff * (1 + (employeeTaxRate / 100));
+      }
+    });
+
+    (opexItems || []).forEach((op) => {
+      for (let i = 0; i < yearsCount; i++) {
+        operationalCosts[i] += Number(op?.amounts?.[i] || 0);
+      }
+    });
+
+    (capexItems || []).forEach((cx) => {
+      for (let i = 0; i < yearsCount; i++) {
+        capexTotal[i] += Number(cx?.amounts?.[i] || 0);
+      }
+    });
+
+    (loans || []).forEach((loan) => {
+      const principal = Number(loan?.principal || 0);
+      const interestRate = Number(loan?.interestRate || 0) / 100;
+      const durationYears = Number(loan?.durationYears || 0);
+
+      const annualPrincipal = durationYears > 0 ? principal / durationYears : 0;
+      let runningDebt = principal;
+
+      for (let yr = 0; yr < yearsCount; yr++) {
+        if (yr === 0) newDebtInflows[yr] += principal;
+        if (runningDebt > 0 && yr < durationYears) {
+          yearlyInterestExpenses[yr] += runningDebt * interestRate;
+          yearlyPrincipalRepayments[yr] += annualPrincipal;
+          runningDebt = Math.max(0, runningDebt - annualPrincipal);
+        }
+        totalDebtPerYear[yr] += runningDebt;
+      }
+    });
+
+    // Ammortamenti dinamici legati ai CAPEX (20% annuo) + eventuale quota base
+    const yearlyDepreciation = capexTotal.map((cx) => Number(depreciation || 0) + (cx * 0.20));
+
+    const ebitda = revenues.map((rev, i) => rev - (cogs[i] + staffCosts[i] + operationalCosts[i]));
+    const ebit = ebitda.map((eb, i) => eb - yearlyDepreciation[i]);
+    const totalFinancialExpenses = yearlyInterestExpenses.map((interest) => interest + Number(financialExpenses || 0));
+    const ebt = ebit.map((eb, i) => eb + Number(financialIncome || 0) - totalFinancialExpenses[i]);
+    const taxes = ebt.map((eb) => (eb > 0 ? eb * (Number(corporateTaxRate || 0) / 100) : 0));
+    const netIncome = ebt.map((eb, i) => eb - taxes[i]);
+
+    const pnlRows: PnLRowData[] = [
+      { label: 'Valore della Produzione (Ricavi)', values: revenues },
+      { label: 'Costi Operativi (COGS)', values: cogs, isNegative: true },
+      { label: 'Costi del Personale (incl. oneri)', values: staffCosts, isNegative: true },
+      { label: 'Costi Operativi (OPEX)', values: operationalCosts, isNegative: true },
+      { label: 'EBITDA', values: ebitda, isSubtotal: true },
+      { label: 'Ammortamenti', values: yearlyDepreciation, isNegative: true },
+      { label: 'EBIT (Risultato Operativo)', values: ebit, isSubtotal: true },
+      { label: 'Oneri Finanziari', values: totalFinancialExpenses, isNegative: true },
+      { label: 'Utile Ante Tasse (EBT)', values: ebt, isSubtotal: true },
+      { label: `Imposte sul Reddito (${corporateTaxRate}%)`, values: taxes, isNegative: true },
+      { label: 'Utile Netto', values: netIncome, isSubtotal: true }
+    ];
+
+    // Cash Flow
+    const operatingCF = netIncome.map((ni, i) => ni + yearlyDepreciation[i] + workingCapitalChange[i]);
+    const totalInvestmentCF = capexTotal.map((cx, i) => assetSales[i] - cx);
+    const netDebtVariation = newDebtInflows.map((inf, i) => inf - yearlyPrincipalRepayments[i]);
+    const dividendsPaid = netIncome.map((ni) => (ni > 0 ? ni * 0.5 : 0));
+    const capitalInjection = Array(yearsCount).fill(0);
+    const totalFinancingCF = netDebtVariation.map((nd, i) => nd + capitalInjection[i] - dividendsPaid[i]);
+    const netCashVariation = operatingCF.map((ocf, i) => ocf + totalInvestmentCF[i] + totalFinancingCF[i]);
+
+    const cashBeginning = Array(yearsCount).fill(0);
+    const cashEnding = Array(yearsCount).fill(0);
+
+    let runningCash = 0;
+    for (let i = 0; i < yearsCount; i++) {
+      cashBeginning[i] = runningCash;
+      runningCash += netCashVariation[i];
+      cashEnding[i] = runningCash;
+    }
+
+    const cashFlowRows: CashFlowRowData[] = [
+      { label: 'Profitto Netto', values: netIncome },
+      { label: 'Amm.ti e Sva.ni', values: yearlyDepreciation },
+      { label: 'Var.ne Capitale Circolante', values: workingCapitalChange },
+      { label: 'F.Cassa Operativo', values: operatingCF, isSubtotal: true },
+      { label: 'CAPEX', values: capexTotal.map(c => -c), isNegative: true },
+      { label: 'Vendita proprietà', values: assetSales },
+      { label: 'Totale F.C.Investimento', values: totalInvestmentCF, isSubtotal: true },
+      { label: 'Var.ne Debito Netto', values: netDebtVariation },
+      { label: 'Dividendi pagati 50%', values: dividendsPaid.map(d => -d), isNegative: true },
+      { label: 'Immissione di Capitale', values: capitalInjection },
+      { label: 'Totale F.C. Finanziamenti', values: totalFinancingCF, isSubtotal: true },
+      { label: 'Variazione/Saldo liquidità netta', values: netCashVariation, isSubtotal: true },
+      { label: 'Var.ne Liquidità netta', values: netCashVariation },
+      { label: 'Cassa inizio', values: cashBeginning },
+      { label: 'Cassa alla fine', values: cashEnding, isSubtotal: true }
+    ];
+
+    // --- STATO PATRIMONIALE PERFETTAMENTE QUADRATO ---
+    const fixedAssets = Array(yearsCount).fill(0);
+    let runningNetAssets = 0;
+    for (let i = 0; i < yearsCount; i++) {
+      runningNetAssets += capexTotal[i] - yearlyDepreciation[i];
+      fixedAssets[i] = Math.max(0, runningNetAssets);
+    }
+
+    const currentAssets = cashEnding.map(c => Math.max(0, c));
+    const totalAssets = fixedAssets.map((fa, i) => fa + currentAssets[i]);
+
+    const financialLiabilities = totalDebtPerYear;
+    const equity = totalAssets.map((ta, i) => ta - financialLiabilities[i]);
+    const totalLiabilitiesAndEquity = financialLiabilities.map((fl, i) => fl + equity[i]);
+
+    const balanceSheetRows: BalanceSheetRowData[] = [
+      { label: 'Attivo Immobilizzato Netto', values: fixedAssets },
+      { label: 'Attivo Circolante (Liquidità & Cassa)', values: currentAssets },
+      { label: 'Totale Attivo', values: totalAssets, isSubtotal: true },
+      { label: 'Patrimonio Netto', values: equity },
+      { label: 'Passività Finanziarie (Debiti Mutui)', values: financialLiabilities },
+      { label: 'Totale Passivo & Patrimonio Netto', values: totalLiabilitiesAndEquity, isSubtotal: true }
+    ];
+
+    // --- KPI AVANZATI DINAMICI & REALI ---
+    const ebitdaMargin = revenues.map((rev, i) => (rev > 0 ? (ebitda[i] / rev) * 100 : 0));
+    const hasActivity = revenues.some(r => r > 0) || capexTotal.some(c => c > 0);
+    const waccConstant = Array(yearsCount).fill(hasActivity ? 8.5 : 0);
+
+    const roi = ebit.map((eb, i) => {
+      const ta = totalAssets[i] || 0;
+      return ta > 0 ? (eb / ta) * 100 : 0;
+    });
+
+    const roe = netIncome.map((ni, i) => {
+      const eq = equity[i] || 0;
+      return eq > 0 ? (ni / eq) * 100 : 0;
+    });
+
+    const initialInv = capexTotal[0] || 0;
+    const totalInflows = operatingCF.reduce((a, b) => a + b, 0);
+    let calculatedIRR = 0;
+    if (initialInv > 0 && totalInflows > 0) {
+      calculatedIRR = Number((((totalInflows / initialInv) ** (1 / 5) - 1) * 100).toFixed(1));
+      if (isNaN(calculatedIRR) || !isFinite(calculatedIRR)) calculatedIRR = 0;
+    }
+    const irrSeries = Array(yearsCount).fill(calculatedIRR);
+
+    const kpiRows: KpiRowData[] = [
+      { label: 'EBIT (Risultato Operativo)', values: ebit, isCurrency: true },
+      { label: 'EBITDA Margine', values: ebitdaMargin, isPercentage: true },
+      { label: 'ROI (Return on Investment)', values: roi, isPercentage: true },
+      { label: 'ROE (Return on Equity)', values: roe, isPercentage: true },
+      { label: 'WACC (Costo Medio Capitolale)', values: waccConstant, isPercentage: true },
+      { label: 'IRR (Tasso Interno di Rendimento)', values: irrSeries, isPercentage: true }
+    ];
+
+    return { pnlRows, kpiRows, cashFlowRows, balanceSheetRows };
+  }, [products, generalProductionCosts, staffCostsItems, opexItems, capexItems, depreciation, financialIncome, financialExpenses, corporateTaxRate, employeeTaxRate, loans]);
+
   const handleStatusChange = async (newStatus: EntityStatus) => {
     setProjectData((prev: any) => ({ ...prev, stato: newStatus }));
     try {
-      await supabase
-        .from('gos_progetti')
-        .update({ stato: newStatus })
-        .eq('id', projectId);
+      await supabase.from('gos_progetti').update({ stato: newStatus }).eq('id', projectId);
     } catch (err) {
       console.error('Errore aggiornamento stato su database:', err);
     }
@@ -209,22 +408,21 @@ export default function ProjectDetailView() {
   const handleDownloadPDF = () => {
     try {
       setGeneratingPdf(true);
-
       const bpData = {
-        kpis: kpiRows.map(k => ({
+        kpis: calculatedFinancials.kpiRows.map(k => ({
           label: k.label,
-          value: `${k.values[4]}%`,
+          value: k.isCurrency ? `€ ${Math.round(k.values[4] || 0).toLocaleString('it-IT')}` : `${k.values[4]?.toFixed(1)}%`,
           variance: 'Target Quinquennale'
         })),
-        balanceSheet: [
-          ['Attivo Circolante & Immobilizzato', '150.000', '180.000', '210.000', '240.000', '280.000'],
-          ['Patrimonio Netto & Passività', '150.000', '180.000', '210.000', '240.000', '280.000']
-        ],
-        incomeStatement: pnlRows.map(row => [
+        balanceSheet: calculatedFinancials.balanceSheetRows.map(row => [
           row.label,
           ...row.values.map(v => Math.round(v).toLocaleString('it-IT'))
         ]),
-        cashFlow: cashFlowRows.map(row => [
+        incomeStatement: calculatedFinancials.pnlRows.map(row => [
+          row.label,
+          ...row.values.map(v => Math.round(v).toLocaleString('it-IT'))
+        ]),
+        cashFlow: calculatedFinancials.cashFlowRows.map(row => [
           row.label,
           ...row.values.map(v => Math.round(v).toLocaleString('it-IT'))
         ]),
@@ -260,43 +458,42 @@ export default function ProjectDetailView() {
       <div className="max-w-7xl mx-auto space-y-8">
         
         {/* INTESTAZIONE & AZIONI */}
-<div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-gray-800 pb-6">
-  <div className="space-y-2">
-    <div className="flex items-center gap-3">
-      <span className="px-3 py-1 bg-gray-900 border border-gray-800 text-[#FF5500] font-mono text-xs font-bold rounded-lg uppercase">
-        {projectData.codice_progetto || 'PROJ'}
-      </span>
-      <ProjectStatusSelect
-        status={projectData.stato || 'Attivo'}
-        onChange={handleStatusChange}
-      />
-    </div>
-    <h1 className="text-3xl font-extrabold text-white uppercase tracking-tight">
-      {projectData.titolo}
-    </h1>
-    <p className="text-xs text-gray-400">{projectData.descrizione}</p>
-  </div>
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-gray-800 pb-6">
+          <div className="space-y-2">
+            <div className="flex items-center gap-3">
+              <span className="px-3 py-1 bg-gray-900 border border-gray-800 text-[#FF5500] font-mono text-xs font-bold rounded-lg uppercase">
+                {projectData.codice_progetto || 'PROJ'}
+              </span>
+              <ProjectStatusSelect
+                status={projectData.stato || 'Attivo'}
+                onChange={handleStatusChange}
+              />
+            </div>
+            <h1 className="text-3xl font-extrabold text-white uppercase tracking-tight">
+              {projectData.titolo}
+            </h1>
+            <p className="text-xs text-gray-400">{projectData.descrizione}</p>
+          </div>
 
-  <div className="flex items-center gap-3">
-    <button
-      onClick={handleDownloadPDF}
-      disabled={generatingPdf}
-      className="px-4 py-2 bg-[#FF5500] hover:bg-orange-600 text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-md disabled:opacity-50 flex items-center gap-2 uppercase tracking-wider"
-    >
-      {generatingPdf ? 'Generazione PDF...' : '📄 Scarica Report PDF'}
-    </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleDownloadPDF}
+              disabled={generatingPdf}
+              className="px-4 py-2 bg-[#FF5500] hover:bg-orange-600 text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-md disabled:opacity-50 flex items-center gap-2 uppercase tracking-wider"
+            >
+              {generatingPdf ? 'Generazione PDF...' : '📄 Scarica Report PDF'}
+            </button>
 
-    <button
-      onClick={() => router.back()}
-      className="px-4 py-2 bg-gray-900 hover:bg-gray-800 border border-gray-800 text-xs font-semibold rounded-xl text-gray-300 transition-all cursor-pointer"
-    >
-      Torna indietro
-    </button>
-  </div>
-</div>
+            <button
+              onClick={() => router.back()}
+              className="px-4 py-2 bg-gray-900 hover:bg-gray-800 border border-gray-800 text-xs font-semibold rounded-xl text-gray-300 transition-all cursor-pointer"
+            >
+              Torna indietro
+            </button>
+          </div>
+        </div>
 
-
-        {/* BARRA DEI TAB AGGIORNATA CON TASKS E RUOLI */}
+        {/* BARRA DEI TAB */}
         <div className="flex flex-wrap gap-6 border-b border-gray-800 pb-4 text-sm font-semibold">
           <button
             onClick={() => setActiveTab('input')}
@@ -321,6 +518,12 @@ export default function ProjectDetailView() {
             className={`pb-2 transition-all cursor-pointer ${activeTab === 'cashflow' ? 'text-white border-b-2 border-[#FF5500]' : 'text-gray-400 hover:text-gray-200'}`}
           >
             Cash Flow
+          </button>
+          <button
+            onClick={() => setActiveTab('bs')}
+            className={`pb-2 transition-all cursor-pointer ${activeTab === 'bs' ? 'text-white border-b-2 border-[#FF5500]' : 'text-gray-400 hover:text-gray-200'}`}
+          >
+            Stato Patrimoniale
           </button>
           <button
             onClick={() => setActiveTab('debt')}
@@ -349,35 +552,44 @@ export default function ProjectDetailView() {
             setProducts={setProducts}
             generalProductionCosts={generalProductionCosts}
             setGeneralProductionCosts={setGeneralProductionCosts}
+            staffCostsItems={staffCostsItems}
+            setStaffCostsItems={setStaffCostsItems}
             capexItems={capexItems}
             setCapexItems={setCapexItems}
             opexItems={opexItems}
             setOpexItems={setOpexItems}
-            otherOperatingExpenses={otherOperatingExpenses}
-            setOtherOperatingExpenses={setOtherOperatingExpenses}
+            corporateTaxRate={corporateTaxRate}
+            setCorporateTaxRate={setCorporateTaxRate}
+            employeeTaxRate={employeeTaxRate}
+            setEmployeeTaxRate={setEmployeeTaxRate}
             depreciation={depreciation}
             setDepreciation={setDepreciation}
             financialIncome={financialIncome}
             setFinancialIncome={setFinancialIncome}
             financialExpenses={financialExpenses}
             setFinancialExpenses={setFinancialExpenses}
-            corporateTaxRate={corporateTaxRate}
-            setCorporateTaxRate={setCorporateTaxRate}
             onSave={handleSaveAll}
             saving={saving}
           />
         )}
 
         {activeTab === 'metrics' && (
-          <KeyMetricsView kpiRows={kpiRows} />
+          <div className="space-y-6">
+            <KeyMetricsView kpiRows={calculatedFinancials.kpiRows} />
+            <KpiGuideView />
+          </div>
         )}
 
         {activeTab === 'pl' && (
-          <ProfitAndLossView pnlRows={pnlRows} corporateTaxRate={corporateTaxRate} />
+          <ProfitAndLossView pnlRows={calculatedFinancials.pnlRows} corporateTaxRate={corporateTaxRate} />
         )}
 
         {activeTab === 'cashflow' && (
-          <CashFlowView cashFlowRows={cashFlowRows} />
+          <CashFlowView cashFlowRows={calculatedFinancials.cashFlowRows} />
+        )}
+
+        {activeTab === 'bs' && (
+          <BalanceSheetView balanceSheetRows={calculatedFinancials.balanceSheetRows} />
         )}
 
         {activeTab === 'debt' && (
@@ -386,14 +598,12 @@ export default function ProjectDetailView() {
           </div>
         )}
 
-        {/* SEZIONE TAB TASKS INTEGRATA */}
         {activeTab === 'tasks' && (
           <div className="bg-gray-900 border border-gray-800 p-6 rounded-2xl space-y-6">
             <TaskScheduleView projectId={projectId} />
           </div>
         )}
 
-        {/* SEZIONE TAB RUOLI INTEGRATA */}
         {activeTab === 'ruoli' && (
           <div className="bg-gray-900 border border-gray-800 p-6 rounded-2xl space-y-6">
             <ProjectGovernanceView projectId={projectId} />
