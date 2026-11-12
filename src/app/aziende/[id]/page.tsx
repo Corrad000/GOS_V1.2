@@ -1,22 +1,35 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useParams } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
 import AnagraficaForm from '../../components/AnagraficaForm';
 import { CompanyQuestionariView } from '../../components/CompanyQuestionariView';
 import { OfferBuilderView } from '@/modules/offer-builder/OfferBuilderView';
+import { ModulePickerModal } from '@/modules/offer-builder/ModulePickerModal';
+import { OfferPreviewView } from '@/modules/offer-builder/OfferPreviewView';
 
 export default function CompanyDashboardView() {
   const router = useRouter();
+  const params = useParams();
+  const companyId = params?.id as string;
+
   const [activeTab, setActiveTab] = useState<'anagrafica' | 'questionari' | 'business' | 'offer-builder' | 'documenti' | 'tasse'>('anagrafica');
+  const [loadingCompany, setLoadingCompany] = useState(true);
   
   const [companyData, setCompanyData] = useState({
-    ragione_sociale: 'Mariella S.r.l.',
-    codice_azienda: 'COMP-003',
-    partita_iva: '01234567890',
+    id: '',
+    ragione_sociale: 'Caricamento in corso...',
+    codice_azienda: '',
+    partita_iva: '',
+    codice_fiscale: '',
+    email: '',
+    telefono: '',
+    indirizzo: '',
+    note: '',
     advisor_nome: 'Corrado Pinna',
-    fatturato: 250000,
+    fatturato: 0,
+    contratti_attivi: 0,
     stato: 'ATTIVA'
   });
 
@@ -33,6 +46,17 @@ export default function CompanyDashboardView() {
   const [companyFiles, setCompanyFiles] = useState<any[]>([]);
   const [uploadingFile, setUploadingFile] = useState(false);
 
+  // Stati per la gestione del Picker moduli, della composizione offerta e dell'anteprima
+  const [isModulePickerOpen, setIsModulePickerOpen] = useState(false);
+  const [selectedCategoryForPicker, setSelectedCategoryForPicker] = useState<any>(null);
+  const [selectedCompanyModules, setSelectedCompanyModules] = useState<any[]>([]);
+  const [showOfferPreview, setShowOfferPreview] = useState(false);
+
+  // Funzione per rimuovere un modulo dall'offerta dell'azienda
+  const handleRemoveCompanyModule = (moduleId: string) => {
+    setSelectedCompanyModules(prev => prev.filter(m => m.id !== moduleId));
+  };
+
   // Stati Impostazioni Tasse Aziendali
   const [taxSettings, setTaxSettings] = useState({
     regime: 'Ordinario',
@@ -48,8 +72,50 @@ export default function CompanyDashboardView() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
 
+  // Caricamento dati reali dell'azienda specifica da gos_aziende tramite l'ID della rotta
   useEffect(() => {
-    if (activeTab !== 'business') return;
+    if (!companyId) return;
+
+    async function fetchCompanyDetails() {
+      setLoadingCompany(true);
+      try {
+        const { data, error } = await supabase
+          .from('gos_aziende')
+          .select('*')
+          .eq('id', companyId)
+          .single();
+
+        if (error) throw error;
+
+        if (data) {
+          setCompanyData({
+            id: data.id,
+            ragione_sociale: data.ragione_sociale || 'Azienda senza nome',
+            codice_azienda: data.codice_azienda || data.id,
+            partita_iva: data.partita_iva || 'Non specificata',
+            codice_fiscale: data.codice_fiscale || 'Non specificato',
+            email: data.email || 'N/D',
+            telefono: data.telefono || 'N/D',
+            indirizzo: data.indirizzo || 'N/D',
+            note: data.note || '',
+            advisor_nome: data.advisor_nome || '',
+            fatturato: Number(data.fatturato || 0),
+            contratti_attivi: Number(data.contratti_attivi || 0),
+            stato: data.stato || 'ATTIVA'
+          });
+        }
+      } catch (err: any) {
+        console.error('Errore nel caricamento dell\'azienda:', err?.message || err);
+      } finally {
+        setLoadingCompany(false);
+      }
+    }
+
+    fetchCompanyDetails();
+  }, [companyId, supabase]);
+
+  useEffect(() => {
+    if (activeTab !== 'business' || !companyData.codice_azienda) return;
 
     async function loadProgetti() {
       setLoadingBp(true);
@@ -73,7 +139,7 @@ export default function CompanyDashboardView() {
   }, [activeTab, companyData.codice_azienda, supabase]);
 
   useEffect(() => {
-    if (activeTab !== 'documenti') return;
+    if (activeTab !== 'documenti' || !companyData.codice_azienda) return;
 
     async function loadCompanyFiles() {
       try {
@@ -142,6 +208,23 @@ export default function CompanyDashboardView() {
     } finally {
       setUploadingFile(false);
       e.target.value = '';
+    }
+  };
+
+  const handleDeleteFile = async (fileId: string) => {
+    if (!confirm('Sei sicuro di voler eliminare questo documento?')) return;
+
+    try {
+      const { error } = await supabase
+        .from('gos_company_files')
+        .delete()
+        .eq('id', fileId);
+
+      if (error) throw error;
+
+      setCompanyFiles(prev => prev.filter(f => f.id !== fileId));
+    } catch (err) {
+      setCompanyFiles(prev => prev.filter(f => f.id !== fileId));
     }
   };
 
@@ -266,7 +349,7 @@ export default function CompanyDashboardView() {
                 <div className="flex justify-between items-center border-b border-gray-800 pb-4">
                   <div>
                     <h3 className="text-base font-bold text-white uppercase">Scheda Anagrafica Azienda</h3>
-                    <p className="text-xs text-gray-400 mt-0.5">Informazioni societarie e dati di riferimento</p>
+                    <p className="text-xs text-gray-400 mt-0.5">Informazioni societarie e dati di riferimento completi</p>
                   </div>
                   <button
                     onClick={() => setIsEditingAnagrafica(true)}
@@ -283,8 +366,18 @@ export default function CompanyDashboardView() {
                   </div>
 
                   <div className="bg-gray-950 p-4 rounded-xl border border-gray-800 space-y-1">
-                    <span className="text-gray-500 uppercase font-mono text-[10px]">Codice Azienda / P.IVA</span>
-                    <div className="text-sm font-bold text-[#FF5500] font-mono">{companyData.codice_azienda} — {companyData.partita_iva}</div>
+                    <span className="text-gray-500 uppercase font-mono text-[10px]">Codice Azienda / P.IVA / C.F.</span>
+                    <div className="text-sm font-bold text-[#FF5500] font-mono">{companyData.codice_azienda} — {companyData.partita_iva} / {companyData.codice_fiscale}</div>
+                  </div>
+
+                  <div className="bg-gray-950 p-4 rounded-xl border border-gray-800 space-y-1">
+                    <span className="text-gray-500 uppercase font-mono text-[10px]">Contatti (Email / Telefono)</span>
+                    <div className="text-sm font-semibold text-white">{companyData.email} • {companyData.telefono}</div>
+                  </div>
+
+                  <div className="bg-gray-950 p-4 rounded-xl border border-gray-800 space-y-1">
+                    <span className="text-gray-500 uppercase font-mono text-[10px]">Indirizzo Sede</span>
+                    <div className="text-sm font-semibold text-white">{companyData.indirizzo}</div>
                   </div>
 
                   <div className="bg-gray-950 p-4 rounded-xl border border-gray-800 space-y-1">
@@ -296,14 +389,44 @@ export default function CompanyDashboardView() {
                     <span className="text-gray-500 uppercase font-mono text-[10px]">Fatturato Registrato</span>
                     <div className="text-sm font-bold text-emerald-400 font-mono">€ {companyData.fatturato.toLocaleString('it-IT')}</div>
                   </div>
+
+                  {companyData.note && (
+                    <div className="bg-gray-950 p-4 rounded-xl border border-gray-800 space-y-1 md:col-span-2">
+                      <span className="text-gray-500 uppercase font-mono text-[10px]">Note Aziendali</span>
+                      <div className="text-sm text-gray-300">{companyData.note}</div>
+                    </div>
+                  )}
                 </div>
               </div>
             ) : (
               <AnagraficaForm
                 initialData={companyData}
-                onSave={(updatedData) => {
-                  setCompanyData(updatedData);
-                  setIsEditingAnagrafica(false);
+                onSave={async (updatedData) => {
+                  try {
+                    const { error } = await supabase
+                      .from('gos_aziende')
+                      .update({
+                        ragione_sociale: updatedData.ragione_sociale,
+                        partita_iva: updatedData.partita_iva,
+                        codice_fiscale: updatedData.codice_fiscale,
+                        indirizzo: updatedData.indirizzo,
+                        email: updatedData.email,
+                        telefono: updatedData.telefono,
+                        advisor_nome: updatedData.advisor_nome,
+                        fatturato: updatedData.fatturato,
+                        note: updatedData.note,
+                        stato: updatedData.stato
+                      })
+                      .eq('id', companyId);
+
+                    if (error) throw error;
+
+                    setCompanyData(prev => ({ ...prev, ...updatedData }));
+                    setIsEditingAnagrafica(false);
+                    alert('Dati aziendali aggiornati con successo!');
+                  } catch (err: any) {
+                    alert('Errore durante il salvataggio: ' + (err.message || err));
+                  }
                 }}
                 onCancel={() => setIsEditingAnagrafica(false)}
               />
@@ -381,7 +504,56 @@ export default function CompanyDashboardView() {
         )}
 
         {activeTab === 'offer-builder' && (
-          <OfferBuilderView />
+          <div className="space-y-6">
+            {!showOfferPreview ? (
+              <div className="space-y-6">
+                {/* Pulsante per visualizzare l'anteprima in chiaro quando ci sono moduli */}
+                {selectedCompanyModules.length > 0 && (
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => setShowOfferPreview(true)}
+                      className="px-5 py-2.5 bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold rounded-xl shadow transition-all cursor-pointer uppercase tracking-wider flex items-center gap-2"
+                    >
+                      👁️ Visualizza Anteprima Proposta in Chiaro
+                    </button>
+                  </div>
+                )}
+
+                <OfferBuilderView 
+                  companyId={companyId}
+                  companyCode={companyData.codice_azienda}
+                  selectedCompanyModules={selectedCompanyModules}
+                  onRemoveModule={handleRemoveCompanyModule}
+                  onOpenModulePicker={(category: any) => {
+                    setSelectedCategoryForPicker(category);
+                    setIsModulePickerOpen(true);
+                  }}
+                />
+              </div>
+            ) : (
+              <OfferPreviewView
+                companyData={companyData}
+                selectedModules={selectedCompanyModules}
+                onBackToBuilder={() => setShowOfferPreview(false)}
+              />
+            )}
+
+            <ModulePickerModal
+              selectedCategory={selectedCategoryForPicker}
+              isOpen={isModulePickerOpen}
+              onClose={() => setIsModulePickerOpen(false)}
+              onSelectModule={(module: any) => {
+                if (selectedCompanyModules.some(m => m.id === module.id)) {
+                  alert('Questo modulo è già stato aggiunto all\'offerta.');
+                  return;
+                }
+                setSelectedCompanyModules(prev => [...prev, module]);
+                alert(`Modulo "${module.title || module.titolo}" aggiunto con successo!`);
+                setIsModulePickerOpen(false);
+              }}
+            />
+          </div>
         )}
 
         {activeTab === 'documenti' && (
@@ -426,14 +598,22 @@ export default function CompanyDashboardView() {
                       <span className="text-[10px] font-mono text-gray-500">
                         {new Date(file.created_at || Date.now()).toLocaleDateString()}
                       </span>
-                      <a
-                        href={file.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="px-3 py-1 bg-gray-900 hover:bg-gray-800 text-gray-200 font-bold rounded-lg border border-gray-800 transition-all text-xs"
-                      >
-                        Download
-                      </a>
+                      <div className="flex items-center gap-2">
+                        <a
+                          href={file.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-3 py-1 bg-gray-900 hover:bg-gray-800 text-gray-200 font-bold rounded-lg border border-gray-800 transition-all text-xs"
+                        >
+                          Download
+                        </a>
+                        <button
+                          onClick={() => handleDeleteFile(file.id)}
+                          className="px-2.5 py-1 bg-red-950 hover:bg-red-900 text-red-300 font-bold rounded-lg border border-red-800 transition-all text-xs cursor-pointer"
+                        >
+                          Elimina
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ))}

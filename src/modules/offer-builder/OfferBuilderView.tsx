@@ -3,14 +3,29 @@
 import React, { useState, useEffect } from 'react';
 import { createBrowserClient } from '@supabase/ssr';
 import { OfferModuloList } from './OfferModuloList';
+import { CompanyOfferSummary } from './CompanyOfferSummary';
 
-export function OfferBuilderView() {
+interface OfferBuilderViewProps {
+  companyId?: string;
+  companyCode?: string;
+  selectedCompanyModules: any[];
+  onRemoveModule: (moduleId: string) => void;
+  onOpenModulePicker?: (category: any) => void;
+}
+
+export function OfferBuilderView({ 
+  companyId, 
+  companyCode, 
+  selectedCompanyModules, 
+  onRemoveModule, 
+  onOpenModulePicker 
+}: OfferBuilderViewProps) {
   const [categories, setCategories] = useState<any[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<any | null>(null);
   const [modules, setModules] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // Modale creazione modulo offerta con i campi specificati
+  // Modale creazione modulo offerta (mantenuta per retrocompatibilità o fallback)
   const [showModal, setShowModal] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newDescription, setNewDescription] = useState('');
@@ -24,7 +39,7 @@ export function OfferBuilderView() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
 
-  // Caricamento categorie dedicate alle OFFERTE da gos_offerte_categorie (Isolato dai questionari)
+  // Caricamento categorie dedicate alle OFFERTE da gos_offerte_categorie
   useEffect(() => {
     async function loadCategories() {
       setLoading(true);
@@ -32,7 +47,6 @@ export function OfferBuilderView() {
         let { data, error } = await supabase.from('gos_offerte_categorie').select('*').order('nome');
         
         if (error || !data || data.length === 0) {
-          // Fallback di sicurezza se la tabella sul DB non è ancora popolata
           data = [
             { id: 'cat-off-1', nome: 'Consulenza Strategica & Advisory' },
             { id: 'cat-off-2', nome: 'Automazione, CRM & Funnel' },
@@ -55,7 +69,7 @@ export function OfferBuilderView() {
     loadCategories();
   }, [supabase]);
 
-  // Caricamento moduli offerta per categoria da gos_offerte_moduli (Isolato dai questionari)
+  // Caricamento moduli offerta per categoria da gos_offerte_moduli
   useEffect(() => {
     if (!selectedCategory) return;
 
@@ -83,6 +97,15 @@ export function OfferBuilderView() {
     loadModules();
   }, [selectedCategory, supabase]);
 
+  // Gestione del click sul pulsante "+ Aggiungi Modulo Offerta"
+  const handleTriggerAddModule = () => {
+    if (onOpenModulePicker && selectedCategory) {
+      onOpenModulePicker(selectedCategory);
+    } else {
+      setShowModal(true);
+    }
+  };
+
   // Salvataggio nuovo modulo offerta sulla tabella dedicata gos_offerte_moduli
   const handleCreateModule = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -108,14 +131,12 @@ export function OfferBuilderView() {
         .single();
 
       if (error) {
-        // Fallback locale in caso di tabella non ancora migrata
         const simulated = { id: Date.now().toString(), ...payload };
         setModules([...modules, simulated]);
       } else if (data) {
         setModules([...modules, data]);
       }
 
-      // Reset campi
       setNewTitle('');
       setNewDescription('');
       setNewNotes('');
@@ -159,15 +180,14 @@ export function OfferBuilderView() {
         </div>
       </div>
 
-      {/* LISTA MODULI DELLA CATEGORIA SELEZIONATA */}
-      <OfferModuloList
-        selectedCategory={selectedCategory}
-        modules={modules}
-        loading={loading}
-        onOpenCreateModal={() => setShowModal(true)}
+      {/* RIEPILOGO COMPOSIZIONE OFFERTA DELL'AZIENDA */}
+      <CompanyOfferSummary
+        selectedModules={selectedCompanyModules}
+        onRemoveModule={onRemoveModule}
+        onOpenPicker={handleTriggerAddModule}
       />
 
-      {/* MODALE CREAZIONE MODULO OFFERTA AGGIORNATA */}
+      {/* MODALE CREAZIONE MODULO OFFERTA (Fallback se non usata come picker) */}
       {showModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
           <div className="bg-gray-900 border border-gray-800 rounded-2xl max-w-lg w-full p-6 space-y-5 shadow-2xl my-8">

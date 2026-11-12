@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
 
 // Client standard di Supabase per evitare problemi di cookie in locale
@@ -9,29 +9,62 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 interface AnagraficaFormProps {
+  initialData?: any; // Aggiunto per ricevere i dati dell'azienda corrente in modifica
   onSave: (company: any) => void;
   onCancel: () => void;
 }
 
-export default function AnagraficaForm({ onSave, onCancel }: AnagraficaFormProps) {
-  const [ragioneSociale, setRagioneSociale] = useState('');
-  const [categoria, setCategoria] = useState('Manifatturiero / Industriale');
-  const [partitaIva, setPartitaIva] = useState('');
-  const [codiceFiscale, setCodiceFiscale] = useState('');
-  const [indirizzo, setIndirizzo] = useState('');
-  const [cap, setCap] = useState('');
-  const [citta, setCitta] = useState('Cagliari');
-  const [nazione, setNazione] = useState('Italia');
-  const [sitoWeb, setSitoWeb] = useState('');
-  const [referente, setReferente] = useState('');
-  const [email, setEmail] = useState('');
-  const [telefono, setTelefono] = useState('');
-  const [advisorNome, setAdvisorNome] = useState('Corrado Pinna (Administrator)');
-  const [fatturato, setFatturato] = useState(250000);
-  const [note, setNote] = useState('');
+export default function AnagraficaForm({ initialData, onSave, onCancel }: AnagraficaFormProps) {
+  const [ragioneSociale, setRagioneSociale] = useState(initialData?.ragione_sociale || '');
+  const [categoria, setCategoria] = useState(initialData?.categoria || 'Manifatturiero / Industriale');
+  const [partitaIva, setPartitaIva] = useState(initialData?.partita_iva || '');
+  const [codiceFiscale, setCodiceFiscale] = useState(initialData?.codice_fiscale || '');
+  const [indirizzo, setIndirizzo] = useState(initialData?.indirizzo || '');
+  const [cap, setCap] = useState(initialData?.cap || '');
+  const [citta, setCitta] = useState(initialData?.citta || 'Cagliari');
+  const [nazione, setNazione] = useState(initialData?.nazione || 'Italia');
+  const [sitoWeb, setSitoWeb] = useState(initialData?.sito_web || '');
+  const [referente, setReferente] = useState(initialData?.referente || '');
+  const [email, setEmail] = useState(initialData?.email || '');
+  const [telefono, setTelefono] = useState(initialData?.telefono || '');
+  const [advisorNome, setAdvisorNome] = useState(initialData?.advisor_nome || 'Corrado Pinna (Administrator)');
+  const [fatturato, setFatturato] = useState(initialData?.fatturato !== undefined ? initialData.fatturato : 250000);
+  const [note, setNote] = useState(initialData?.note || '');
   
+  // Stato per la lista degli utenti/advisor presi da gos_profiles
+  const [profiles, setProfiles] = useState<any[]>([]);
+  const [loadingProfiles, setLoadingProfiles] = useState(false);
+
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Caricamento dinamico dei profili / advisor da gos_profiles
+  useEffect(() => {
+    async function fetchProfiles() {
+      setLoadingProfiles(true);
+      try {
+        const { data, error } = await supabase
+          .from('gos_profiles')
+          .select('id, nome, email, role');
+
+        if (error) throw error;
+        if (data && data.length > 0) {
+          setProfiles(data);
+          // Seleziona di default il primo se non c'è già un advisor impostato e non siamo in modifica
+          if (!initialData && !advisorNome) {
+            const defaultAdvisor = `${data[0].nome || data[0].email} (${data[0].role || 'Advisor'})`;
+            setAdvisorNome(defaultAdvisor);
+          }
+        }
+      } catch (err: any) {
+        console.error('Errore nel recupero dei profili da gos_profiles:', err);
+      } finally {
+        setLoadingProfiles(false);
+      }
+    }
+
+    fetchProfiles();
+  }, [initialData, advisorNome]);
 
   const handleSaveDirect = async () => {
     if (!ragioneSociale.trim()) {
@@ -48,9 +81,9 @@ export default function AnagraficaForm({ onSave, onCancel }: AnagraficaFormProps
     setLoading(true);
     setErrorMessage(null);
 
-    const newCompanyPayload = {
+    const companyPayload = {
       ragione_sociale: ragioneSociale.trim(),
-      codice_azienda: `AZ-${Math.floor(Math.random() * 90000 + 10000)}`,
+      codice_azienda: initialData?.codice_azienda || `AZ-${Math.floor(Math.random() * 90000 + 10000)}`,
       partita_iva: partitaIva,
       codice_fiscale: codiceFiscale,
       categoria: categoria,
@@ -64,26 +97,38 @@ export default function AnagraficaForm({ onSave, onCancel }: AnagraficaFormProps
       telefono: telefono,
       advisor_nome: advisorNome,
       fatturato: Number(fatturato),
-      contratti_attivi: 3,
+      contratti_attivi: initialData?.contratti_attivi ?? 3,
       note: note,
-      stato: 'ATTIVA'
+      stato: initialData?.stato || 'ATTIVA'
     };
 
     try {
-      const { data, error } = await supabase
-        .from('gos_aziende')
-        .insert([newCompanyPayload])
-        .select()
-        .single();
+      let resultData;
+      if (initialData?.id) {
+        // Modalità UPDATE se l'azienda esiste già
+        const { data, error } = await supabase
+          .from('gos_aziende')
+          .update(companyPayload)
+          .eq('id', initialData.id)
+          .select()
+          .single();
 
-      if (error) {
-        console.error('ERRORE SUPABASE RESTITUITO:', error);
-        alert('ERRORE SUPABASE: ' + (error.message || JSON.stringify(error)));
-        throw error;
+        if (error) throw error;
+        resultData = data;
+      } else {
+        // Modalità INSERT se è una nuova azienda
+        const { data, error } = await supabase
+          .from('gos_aziende')
+          .insert([companyPayload])
+          .select()
+          .single();
+
+        if (error) throw error;
+        resultData = data;
       }
 
-      console.log('SUCCESSO SALVATAGGIO:', data);
-      onSave(data || newCompanyPayload);
+      console.log('SUCCESSO SALVATAGGIO:', resultData);
+      onSave(resultData || companyPayload);
     } catch (err: any) {
       console.error('ERRORE CATCH:', err);
       const msg = err.message || JSON.stringify(err) || 'Errore sconosciuto';
@@ -249,7 +294,7 @@ export default function AnagraficaForm({ onSave, onCancel }: AnagraficaFormProps
           />
         </div>
 
-        {/* Assegna Advisor Responsabile */}
+        {/* Assegna Advisor Responsabile (Dinamico da gos_profiles) */}
         <div className="space-y-1.5">
           <label className="text-gray-300 font-medium uppercase tracking-wider text-[10px]">Assegna Advisor Responsabile</label>
           <select
@@ -257,7 +302,23 @@ export default function AnagraficaForm({ onSave, onCancel }: AnagraficaFormProps
             onChange={(e) => setAdvisorNome(e.target.value)}
             className="w-full bg-gray-900 border border-gray-800 rounded-xl px-3.5 py-2.5 text-white focus:outline-none focus:border-amber-500 font-mono"
           >
-            <option value="Corrado Pinna (Administrator)">Corrado Pinna (Administrator)</option>
+            {advisorNome && !profiles.some(p => `${p.nome || p.email} (${p.role || 'Advisor'})` === advisorNome) && (
+              <option value={advisorNome}>{advisorNome}</option>
+            )}
+            {loadingProfiles ? (
+              <option value="">Caricamento advisor...</option>
+            ) : profiles.length === 0 ? (
+              <option value="Corrado Pinna (Administrator)">Corrado Pinna (Administrator)</option>
+            ) : (
+              profiles.map((p) => {
+                const displayName = `${p.nome || p.email} (${p.role || 'Advisor'})`;
+                return (
+                  <option key={p.id} value={displayName}>
+                    {displayName}
+                  </option>
+                );
+              })
+            )}
           </select>
         </div>
 
@@ -307,7 +368,7 @@ export default function AnagraficaForm({ onSave, onCancel }: AnagraficaFormProps
           disabled={loading}
           className="px-6 py-2.5 bg-amber-600 hover:bg-amber-500 text-white rounded-xl font-bold shadow-lg transition-all cursor-pointer text-xs disabled:opacity-50"
         >
-          {loading ? 'REGISTRAZIONE...' : 'CONFERMA E REGISTRA AZIENDA'}
+          {loading ? 'SALVATAGGIO...' : (initialData ? 'SALVA MODIFICHE' : 'CONFERMA E REGISTRA AZIENDA')}
         </button>
       </div>
     </div>

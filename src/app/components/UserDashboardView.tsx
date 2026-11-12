@@ -5,7 +5,7 @@ import { createBrowserClient } from '@supabase/ssr';
 import { CompanyItem, CompanyTable } from './CompanyTable';
 import { QuestCategory } from './QuestCategory';
 import { QuestModulo } from './QuestModulo';
-import { OfferBuilderView } from '@/modules/offer-builder/OfferBuilderView';
+import { CatalogDashboardView } from '@/modules/offer-builder/CatalogDashboardView'; // <-- Percorso corretto del catalogo offerte
 
 interface UserDashboardViewProps {
   userRole: 'admin' | 'user' | 'advisor' | 'Network Partner';
@@ -319,9 +319,9 @@ export function UserDashboardView({ userRole, userName, companies }: UserDashboa
         </div>
       )}
 
-      {/* TAB 3: CATALOGO OFFERTE & SERVIZI */}
+      {/* TAB 3: CATALOGO OFFERTE & SERVIZI (COLLEGATO A SUPABASE TRAMITE CatalogDashboardView) */}
       {activeTab === 'offerte' && (
-        <OfferBuilderView />
+        <CatalogDashboardView />
       )}
 
       {/* MODALE CREAZIONE MODULO QUESTIONARIO */}
