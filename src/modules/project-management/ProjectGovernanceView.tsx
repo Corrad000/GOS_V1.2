@@ -30,65 +30,12 @@ interface ProjectGovernanceProps {
 export function ProjectGovernanceView({ projectId }: ProjectGovernanceProps) {
   // Stato Rubrica Incaricati
   const [contacts, setContacts] = useState<ContactItem[]>([
-    {
-      id: 'c1',
-      name: 'Corrado Pinna',
-      email: 'corrado.pinna@glaring.co.uk',
-      phone: '+39 070 000000',
-      title: 'Equity Partner & Lead Advisor'
-    },
-    {
-      id: 'c2',
-      name: 'Team Advisor / PM',
-      email: 'pm.ops@glaring.co.uk',
-      phone: '+39 070 111111',
-      title: 'Senior Project Manager'
-    },
-    {
-      id: 'c3',
-      name: 'Management Cliente',
-      email: 'direzione@azienda-cliente.it',
-      phone: '+39 02 0000000',
-      title: 'Direzione Generale'
-    }
+    
   ]);
 
   // Stato Ruoli & Governance con Storico Assegnazioni
   const [roles, setRoles] = useState<GovernanceRoleItem[]>([
-    {
-      id: 'r1',
-      roleTitle: 'Lead Strategic Advisor',
-      assigneeName: 'Corrado Pinna',
-      email: 'corrado.pinna@glaring.co.uk',
-      phone: '+39 070 000000',
-      responsibilityScope: 'Governance complessiva, modello finanziario e strategia di ristrutturazione',
-      accessLevel: 'FULL_CONTROL',
-      assignmentStatus: 'ATTIVO',
-      startDate: '2026-11-01'
-    },
-    {
-      id: 'r2',
-      roleTitle: 'Project Manager Operativo',
-      assigneeName: 'Team Advisor / PM',
-      email: 'pm.ops@glaring.co.uk',
-      phone: '+39 070 111111',
-      responsibilityScope: 'Monitoraggio task, cronoprogramma e coordinamento operativo',
-      accessLevel: 'ADVISOR',
-      assignmentStatus: 'ATTIVO',
-      startDate: '2026-11-01'
-    },
-    {
-      id: 'r3',
-      roleTitle: 'Junior Analyst Support',
-      assigneeName: 'Mario Rossi (Ex Advisor)',
-      email: 'm.rossi@partner.it',
-      phone: '+39 02 9999999',
-      responsibilityScope: 'Raccolta dati preliminare e prima estrazione dati contabili',
-      accessLevel: 'ADVISOR',
-      assignmentStatus: 'SOSTITUITO',
-      startDate: '2026-10-01',
-      endDate: '2026-10-31'
-    }
+    
   ]);
 
   // Filtro visibilità ruoli

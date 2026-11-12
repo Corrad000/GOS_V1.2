@@ -23,39 +23,7 @@ export function TaskScheduleView({ projectId }: TaskScheduleProps) {
   const [currencySymbol, setCurrencySymbol] = useState<string>('€');
 
   const [tasks, setTasks] = useState<TaskItem[]>([
-    {
-      id: '1',
-      title: 'Analisi preliminare dei flussi finanziari',
-      assignee: 'Team Advisor',
-      startDate: '2026-11-01',
-      endDate: '2026-11-05',
-      estimatedBudget: 1500,
-      actualCost: 1400,
-      priority: 'ALTA',
-      status: 'COMPLETATO'
-    },
-    {
-      id: '2',
-      title: 'Definizione struttura mutui pluriennali e piano debiti',
-      assignee: 'Corrado Pinna',
-      startDate: '2026-11-06',
-      endDate: '2026-11-15',
-      estimatedBudget: 2500,
-      actualCost: 2300,
-      priority: 'ALTA',
-      status: 'IN_CORSO'
-    },
-    {
-      id: '3',
-      title: 'Riorganizzazione dipartimento marketing e vendite',
-      assignee: 'Direzione Strategica',
-      startDate: '2026-11-16',
-      endDate: '2026-11-30',
-      estimatedBudget: 4000,
-      actualCost: 0,
-      priority: 'MEDIA',
-      status: 'PIANIFICATO'
-    }
+    
   ]);
 
   // Stato form per nuovo task

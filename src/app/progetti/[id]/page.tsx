@@ -8,6 +8,8 @@ import { KeyMetricsView, KpiRowData } from '@/modules/financial-engine/KeyMetric
 import { ProfitAndLossView, PnLRowData } from '@/modules/financial-engine/ProfitAndLossView';
 import { CashFlowView, CashFlowRowData } from '@/modules/financial-engine/CashFlowView';
 import { DebtPlanView, LoanItem } from '@/modules/financial-engine/DebtPlanView';
+import { TaskScheduleView } from '@/modules/project-management/TaskScheduleView';
+import { ProjectGovernanceView } from '@/modules/project-management/ProjectGovernanceView';
 import { businessReportService } from '@/services/pdf/businessReportService';
 
 // Componente selettore di stato integrato (Bozza / Attivo / Chiuso)
@@ -44,7 +46,8 @@ export default function ProjectDetailView() {
   const params = useParams();
   const projectId = params?.id as string;
 
-  const [activeTab, setActiveTab] = useState<'input' | 'metrics' | 'pl' | 'cashflow' | 'debt'>('input');
+  // Aggiunti i tab 'tasks' e 'ruoli'
+  const [activeTab, setActiveTab] = useState<'input' | 'metrics' | 'pl' | 'cashflow' | 'debt' | 'tasks' | 'ruoli'>('input');
   const [isMounted, setIsMounted] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -263,7 +266,6 @@ export default function ProjectDetailView() {
               <span className="px-3 py-1 bg-gray-900 border border-gray-800 text-[#FF5500] font-mono text-xs font-bold rounded-lg uppercase">
                 PROJ
               </span>
-              {/* Selettore a tendina dello stato integrato */}
               <ProjectStatusSelect
                 status={projectData.stato || 'Attivo'}
                 onChange={handleStatusChange}
@@ -293,7 +295,7 @@ export default function ProjectDetailView() {
           </div>
         </div>
 
-        {/* BARRA DEI TAB */}
+        {/* BARRA DEI TAB AGGIORNATA CON TASKS E RUOLI */}
         <div className="flex flex-wrap gap-6 border-b border-gray-800 pb-4 text-sm font-semibold">
           <button
             onClick={() => setActiveTab('input')}
@@ -324,6 +326,18 @@ export default function ProjectDetailView() {
             className={`pb-2 transition-all cursor-pointer ${activeTab === 'debt' ? 'text-white border-b-2 border-[#FF5500]' : 'text-gray-400 hover:text-gray-200'}`}
           >
             Debt Plan
+          </button>
+          <button
+            onClick={() => setActiveTab('tasks')}
+            className={`pb-2 transition-all cursor-pointer ${activeTab === 'tasks' ? 'text-white border-b-2 border-[#FF5500]' : 'text-gray-400 hover:text-gray-200'}`}
+          >
+            Tasks
+          </button>
+          <button
+            onClick={() => setActiveTab('ruoli')}
+            className={`pb-2 transition-all cursor-pointer ${activeTab === 'ruoli' ? 'text-white border-b-2 border-[#FF5500]' : 'text-gray-400 hover:text-gray-200'}`}
+          >
+            Ruoli
           </button>
         </div>
 
@@ -368,6 +382,20 @@ export default function ProjectDetailView() {
         {activeTab === 'debt' && (
           <div className="bg-gray-900 border border-gray-800 p-6 rounded-2xl space-y-8">
             <DebtPlanView loans={loans} setLoans={setLoans} />
+          </div>
+        )}
+
+        {/* SEZIONE TAB TASKS INTEGRATA */}
+        {activeTab === 'tasks' && (
+          <div className="bg-gray-900 border border-gray-800 p-6 rounded-2xl space-y-6">
+            <TaskScheduleView projectId={projectId} />
+          </div>
+        )}
+
+        {/* SEZIONE TAB RUOLI INTEGRATA */}
+        {activeTab === 'ruoli' && (
+          <div className="bg-gray-900 border border-gray-800 p-6 rounded-2xl space-y-6">
+            <ProjectGovernanceView projectId={projectId} />
           </div>
         )}
 
