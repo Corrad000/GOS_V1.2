@@ -158,7 +158,7 @@ export default function ProjectDetailView() {
   }, [projectId, supabase]);
 
   // ==========================================
-  // MOTORE FINANZIARIO INTEGRATO & DINAMICO
+  // MOTORE FINANZIARIO & INVESTIMENTO CONSIGLIATO
   // ==========================================
   const calculatedFinancials = useMemo(() => {
     const yearsCount = 5;
@@ -229,7 +229,6 @@ export default function ProjectDetailView() {
       }
     });
 
-    // Ammortamenti dinamici legati ai CAPEX (20% annuo) + eventuale quota base
     const yearlyDepreciation = capexTotal.map((cx) => Number(depreciation || 0) + (cx * 0.20));
 
     const ebitda = revenues.map((rev, i) => rev - (cogs[i] + staffCosts[i] + operationalCosts[i]));
@@ -253,7 +252,6 @@ export default function ProjectDetailView() {
       { label: 'Utile Netto', values: netIncome, isSubtotal: true }
     ];
 
-    // Cash Flow
     const operatingCF = netIncome.map((ni, i) => ni + yearlyDepreciation[i] + workingCapitalChange[i]);
     const totalInvestmentCF = capexTotal.map((cx, i) => assetSales[i] - cx);
     const netDebtVariation = newDebtInflows.map((inf, i) => inf - yearlyPrincipalRepayments[i]);
@@ -290,6 +288,11 @@ export default function ProjectDetailView() {
       { label: 'Cassa alla fine', values: cashEnding, isSubtotal: true }
     ];
 
+    // --- CALCOLO INVESTIMENTO START-UP CONSIGLIATO ---
+    const totalCapexPlan = capexTotal.reduce((a, b) => a + b, 0);
+    const firstYearOperatingOutflow = Math.abs(Math.min(0, operatingCF[0] || 0));
+    const recommendedInvestment = totalCapexPlan + firstYearOperatingOutflow + ((operationalCosts[0] || 0) * 0.15);
+
     // --- STATO PATRIMONIALE PERFETTAMENTE QUADRATO ---
     const fixedAssets = Array(yearsCount).fill(0);
     let runningNetAssets = 0;
@@ -314,7 +317,7 @@ export default function ProjectDetailView() {
       { label: 'Totale Passivo & Patrimonio Netto', values: totalLiabilitiesAndEquity, isSubtotal: true }
     ];
 
-    // --- KPI AVANZATI DINAMICI & REALI ---
+    // --- KPI AVANZATI ---
     const ebitdaMargin = revenues.map((rev, i) => (rev > 0 ? (ebitda[i] / rev) * 100 : 0));
     const hasActivity = revenues.some(r => r > 0) || capexTotal.some(c => c > 0);
     const waccConstant = Array(yearsCount).fill(hasActivity ? 8.5 : 0);
@@ -347,7 +350,7 @@ export default function ProjectDetailView() {
       { label: 'IRR (Tasso Interno di Rendimento)', values: irrSeries, isPercentage: true }
     ];
 
-    return { pnlRows, kpiRows, cashFlowRows, balanceSheetRows };
+    return { pnlRows, kpiRows, cashFlowRows, balanceSheetRows, recommendedInvestment };
   }, [products, generalProductionCosts, staffCostsItems, opexItems, capexItems, depreciation, financialIncome, financialExpenses, corporateTaxRate, employeeTaxRate, loans]);
 
   const handleStatusChange = async (newStatus: EntityStatus) => {
@@ -544,6 +547,52 @@ export default function ProjectDetailView() {
             Ruoli
           </button>
         </div>
+
+        {/* CARD INVESTIMENTO CONSIGLIATO OTTIMIZZATA */}
+        {activeTab === 'input' && (
+          <div className="bg-gradient-to-r from-gray-900 via-gray-900 to-amber-950/30 border border-amber-500/40 p-6 rounded-2xl shadow-xl space-y-4 md:space-y-0 md:flex md:items-center md:justify-between gap-6">
+            
+            {/* Sezione Testuale */}
+            <div className="space-y-2 max-w-3xl">
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center px-2.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-400 uppercase tracking-widest border border-amber-500/30">
+                  💡 Advisory Insight
+                </span>
+                <h3 className="text-base font-extrabold text-white uppercase tracking-tight">
+                  Investimento Start-up Consigliato
+                </h3>
+              </div>
+              <p className="text-xs text-gray-300 leading-relaxed">
+                Fabbisogno finanziario stimato per sostenere il piano, calcolato sommando:
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px] text-gray-400 pt-1 font-mono">
+                <div className="bg-gray-950/60 border border-gray-800 p-2 rounded-lg">
+                  <span className="text-amber-400 font-bold block">1. CAPEX Totali</span>
+                  <span>Investimenti fissi pianificati</span>
+                </div>
+                <div className="bg-gray-950/60 border border-gray-800 p-2 rounded-lg">
+                  <span className="text-amber-400 font-bold block">2. Picco di Cassa</span>
+                  <span>Copertura deficit operativo (Anno 1)</span>
+                </div>
+                <div className="bg-gray-950/60 border border-gray-800 p-2 rounded-lg">
+                  <span className="text-amber-400 font-bold block">3. Buffer Circolante</span>
+                  <span>15% dei costi operativi di base</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Box Cifra in Evidenza */}
+            <div className="flex-shrink-0">
+              <div className="bg-gray-950 border border-amber-500/50 px-6 py-4 rounded-xl text-center md:text-right shadow-inner">
+                <span className="text-[10px] text-amber-400 uppercase tracking-widest font-mono block">Capitale Totale Stimato</span>
+                <span className="text-3xl font-mono font-extrabold text-amber-300 tracking-tight mt-0.5 block">
+                  € {Math.round(calculatedFinancials.recommendedInvestment || 0).toLocaleString('it-IT')}
+                </span>
+              </div>
+            </div>
+
+          </div>
+        )}
 
         {/* CONTENUTO TAB */}
         {activeTab === 'input' && (
