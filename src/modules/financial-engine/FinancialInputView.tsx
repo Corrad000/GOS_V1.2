@@ -132,7 +132,7 @@ export function FinancialInputView({
         <div className="flex justify-between items-center">
           <h4 className="text-xs font-bold text-white uppercase tracking-wider">Product Sold in Pieces (Quantità)</h4>
           <button
-            onClick={() => setProducts([...safeProducts, { name: 'Nuovo Prodotto', pieces: [500, 600, 700, 800, 900], prices: [100, 100, 100, 100, 100], unitCosts: [40, 40, 40, 40, 40] }])}
+            onClick={() => setProducts([...safeProducts, { name: 'Nuovo Prodotto', pieces: [0, 0, 0, 0, 0], prices: [0, 0, 0, 0, 0], unitCosts: [, , 0, 0, 0] }])}
             className="px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-bold rounded-lg transition-all cursor-pointer"
           >
             + Aggiungi Prodotto

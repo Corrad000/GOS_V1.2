@@ -68,9 +68,9 @@ export default function ProjectDetailView() {
   const [products, setProducts] = useState<ProductItem[]>([
     {
       name: 'Prodotto / Servizio Principale',
-      pieces: [1000, 1200, 1500, 1800, 2000],
-      prices: [150, 150, 160, 160, 170],
-      unitCosts: [50, 50, 55, 55, 60]
+      pieces: [0, 0, 0, 0, 0],
+      prices: [0, 0, 0, 0, 0],
+      unitCosts: [0, 0, 0, 0, 0]
     }
   ]);
   const [generalProductionCosts, setGeneralProductionCosts] = useState<DynamicCostItem[]>([]);
@@ -87,29 +87,29 @@ export default function ProjectDetailView() {
     {
       id: '1',
       name: 'Mutuo Chirografario Impianto',
-      principal: 100000,
-      interestRate: 4.5,
-      durationYears: 5
+      principal: 0,
+      interestRate: 0,
+      durationYears: 0
     }
   ]);
 
   // Righe P&L
   const [pnlRows, setPnlRows] = useState<PnLRowData[]>([
-    { label: 'Valore della Produzione (Ricavi)', values: [150000, 180000, 240000, 288000, 340000] },
-    { label: 'Costi del Personale', values: [50000, 52000, 55000, 58000, 60000], isNegative: true },
-    { label: 'Costi Operativi (COGS)', values: [30000, 33000, 36000, 39000, 42000], isNegative: true },
-    { label: 'EBITDA', values: [70000, 95000, 149000, 191000, 238000], isSubtotal: true }
+    { label: 'Valore della Produzione (Ricavi)', values: [0, 0, 0, 0, 0] },
+    { label: 'Costi del Personale', values: [0, 0, 0, 0, 0], isNegative: true },
+    { label: 'Costi Operativi (COGS)', values: [0, 0, 0, 0, 0], isNegative: true },
+    { label: 'EBITDA', values: [0, 0, 0, 0, 0], isSubtotal: true }
   ]);
 
   // Righe KPI
   const [kpiRows, setKpiRows] = useState<KpiRowData[]>([
-    { label: 'EBITDA Margine', values: [46.7, 52.8, 62.1, 66.3, 70.0], isPercentage: true },
-    { label: 'ROI Stimato', values: [18.2, 22.5, 31.0, 35.4, 40.2], isPercentage: true }
+    { label: 'EBITDA Margine', values: [0, 0, 0, 0, 0], isPercentage: true },
+    { label: 'ROI Stimato', values: [0, 0, 0, 0, 0], isPercentage: true }
   ]);
 
   // Righe Cash Flow
   const [cashFlowRows, setCashFlowRows] = useState<CashFlowRowData[]>([
-    { label: 'Flusso di Cassa Operativo', values: [50000, 65000, 80000, 95000, 110000], isSubtotal: true }
+    { label: 'Flusso di Cassa Operativo', values: [0, 0, 0, 0, 0], isSubtotal: true }
   ]);
 
   const supabase = createBrowserClient(
@@ -260,40 +260,41 @@ export default function ProjectDetailView() {
       <div className="max-w-7xl mx-auto space-y-8">
         
         {/* INTESTAZIONE & AZIONI */}
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-gray-800 pb-6">
-          <div className="space-y-2">
-            <div className="flex items-center gap-3">
-              <span className="px-3 py-1 bg-gray-900 border border-gray-800 text-[#FF5500] font-mono text-xs font-bold rounded-lg uppercase">
-                PROJ
-              </span>
-              <ProjectStatusSelect
-                status={projectData.stato || 'Attivo'}
-                onChange={handleStatusChange}
-              />
-            </div>
-            <h1 className="text-3xl font-extrabold text-white uppercase tracking-tight">
-              {projectData.titolo}
-            </h1>
-            <p className="text-xs text-gray-400">{projectData.descrizione}</p>
-          </div>
+<div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-gray-800 pb-6">
+  <div className="space-y-2">
+    <div className="flex items-center gap-3">
+      <span className="px-3 py-1 bg-gray-900 border border-gray-800 text-[#FF5500] font-mono text-xs font-bold rounded-lg uppercase">
+        {projectData.codice_progetto || 'PROJ'}
+      </span>
+      <ProjectStatusSelect
+        status={projectData.stato || 'Attivo'}
+        onChange={handleStatusChange}
+      />
+    </div>
+    <h1 className="text-3xl font-extrabold text-white uppercase tracking-tight">
+      {projectData.titolo}
+    </h1>
+    <p className="text-xs text-gray-400">{projectData.descrizione}</p>
+  </div>
 
-          <div className="flex items-center gap-3">
-            <button
-              onClick={handleDownloadPDF}
-              disabled={generatingPdf}
-              className="px-4 py-2 bg-[#FF5500] hover:bg-orange-600 text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-md disabled:opacity-50 flex items-center gap-2 uppercase tracking-wider"
-            >
-              {generatingPdf ? 'Generazione PDF...' : '📄 Scarica Report PDF'}
-            </button>
+  <div className="flex items-center gap-3">
+    <button
+      onClick={handleDownloadPDF}
+      disabled={generatingPdf}
+      className="px-4 py-2 bg-[#FF5500] hover:bg-orange-600 text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-md disabled:opacity-50 flex items-center gap-2 uppercase tracking-wider"
+    >
+      {generatingPdf ? 'Generazione PDF...' : '📄 Scarica Report PDF'}
+    </button>
 
-            <button
-              onClick={() => router.back()}
-              className="px-4 py-2 bg-gray-900 hover:bg-gray-800 border border-gray-800 text-xs font-semibold rounded-xl text-gray-300 transition-all cursor-pointer"
-            >
-              Torna indietro
-            </button>
-          </div>
-        </div>
+    <button
+      onClick={() => router.back()}
+      className="px-4 py-2 bg-gray-900 hover:bg-gray-800 border border-gray-800 text-xs font-semibold rounded-xl text-gray-300 transition-all cursor-pointer"
+    >
+      Torna indietro
+    </button>
+  </div>
+</div>
+
 
         {/* BARRA DEI TAB AGGIORNATA CON TASKS E RUOLI */}
         <div className="flex flex-wrap gap-6 border-b border-gray-800 pb-4 text-sm font-semibold">

@@ -7,6 +7,8 @@ interface QuestModuloProps {
   modules: ModuloQuestionario[];
   loading: boolean;
   onOpenCreateModal: () => void;
+  onDeleteModule: (moduleId: string) => void;
+  onConfigureModule: (modulo: ModuloQuestionario) => void; // <-- Callback fondamentale per aprire l'Edit Module
 }
 
 export function QuestModulo({
@@ -14,6 +16,8 @@ export function QuestModulo({
   modules,
   loading,
   onOpenCreateModal,
+  onDeleteModule,
+  onConfigureModule,
 }: QuestModuloProps) {
   if (!selectedCategory) return null;
 
@@ -44,6 +48,7 @@ export function QuestModulo({
           <table className="w-full text-left text-xs">
             <thead>
               <tr className="border-b border-gray-800 text-gray-400 font-mono uppercase text-[10px]">
+                <th className="py-3 px-4">Codice Modulo</th>
                 <th className="py-3 px-4">Titolo Modulo</th>
                 <th className="py-3 px-4">Versione</th>
                 <th className="py-3 px-4">Stato</th>
@@ -51,8 +56,11 @@ export function QuestModulo({
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-800/60">
-              {modules.map((mod) => (
+              {modules.map((mod: any) => (
                 <tr key={mod.id} className="hover:bg-gray-950/50">
+                  <td className="py-3 px-4 font-mono font-bold text-[#FF5500]">
+                    {mod.codice_modulo || 'QST-000'}
+                  </td>
                   <td className="py-3 px-4 font-bold text-white">{mod.titolo}</td>
                   <td className="py-3 px-4 font-mono text-gray-300">{mod.versione}</td>
                   <td className="py-3 px-4">
@@ -60,9 +68,18 @@ export function QuestModulo({
                       {mod.stato}
                     </span>
                   </td>
-                  <td className="py-3 px-4 text-right">
-                    <button className="text-amber-400 hover:text-amber-300 font-bold font-mono text-xs cursor-pointer">
+                  <td className="py-3 px-4 text-right space-x-3">
+                    <button
+                      onClick={() => onConfigureModule(mod)} // <-- ORA APRE CORRETTAMENTE LA VISTA EDIT MODULE
+                      className="text-amber-400 hover:text-amber-300 font-bold font-mono text-xs cursor-pointer inline-flex items-center gap-1"
+                    >
                       Configura Domande →
+                    </button>
+                    <button
+                      onClick={() => onDeleteModule(mod.id)}
+                      className="text-red-400 hover:text-red-300 font-mono text-xs font-semibold cursor-pointer bg-red-950/40 hover:bg-red-950 px-2.5 py-1 rounded border border-red-900/50 transition-all"
+                    >
+                      Elimina
                     </button>
                   </td>
                 </tr>

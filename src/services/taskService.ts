@@ -1,4 +1,5 @@
 import { createBrowserClient } from '@supabase/ssr';
+import { generateGlobalActivityCode } from '@/utils/codeGenerator';
 
 const supabase = createBrowserClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -8,6 +9,7 @@ const supabase = createBrowserClient(
 export interface CleanTask {
   id: string;
   progetto_id: string;
+  codice_task?: string; // <-- Aggiunto il campo per il codice univoco
   titolo: string;
   descrizione?: string;
   stato: 'da_fare' | 'in_corso' | 'completato';
@@ -32,10 +34,13 @@ export const taskService = {
     return data || [];
   },
 
-  async createTask(task: Omit<CleanTask, 'id' | 'created_at'>): Promise<CleanTask> {
+  async createTask(task: Omit<CleanTask, 'id' | 'created_at'>, companyCode?: string): Promise<CleanTask> {
+    // Generazione automatica del codice univoco prima dell'inserimento
+    const codiceTask = await generateGlobalActivityCode(companyCode, 'TSK');
+
     const { data, error } = await supabase
       .from('gos_tasks')
-      .insert([task])
+      .insert([{ ...task, codice_task: codiceTask }])
       .select()
       .single();
 
