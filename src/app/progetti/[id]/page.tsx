@@ -11,6 +11,7 @@ import { CashFlowView, CashFlowRowData } from '@/modules/financial-engine/CashFl
 import { DebtPlanView, LoanItem } from '@/modules/financial-engine/DebtPlanView';
 import { TaskScheduleView } from '@/modules/project-management/TaskScheduleView';
 import { ProjectGovernanceView } from '@/modules/project-management/ProjectGovernanceView';
+import CruscottoProgetti from '@/app/components/cruscotto-progetti';
 import { businessReportService } from '@/services/pdf/businessReportService';
 
 type EntityStatus = 'Bozza' | 'Attivo' | 'Chiuso';
@@ -90,7 +91,7 @@ export default function ProjectDetailView() {
   const params = useParams();
   const projectId = params?.id as string;
 
-  const [activeTab, setActiveTab] = useState<'input' | 'metrics' | 'pl' | 'cashflow' | 'bs' | 'debt' | 'tasks' | 'ruoli'>('input');
+  const [activeTab, setActiveTab] = useState<'input' | 'metrics' | 'pl' | 'cashflow' | 'bs' | 'debt' | 'tasks' | 'ruoli' | 'cruscotto'>('input');
   const [isMounted, setIsMounted] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -546,6 +547,12 @@ export default function ProjectDetailView() {
           >
             Ruoli
           </button>
+          <button
+            onClick={() => setActiveTab('cruscotto')}
+            className={`pb-2 transition-all cursor-pointer ${activeTab === 'cruscotto' ? 'text-white border-b-2 border-[#FF5500]' : 'text-gray-400 hover:text-gray-200'}`}
+          >
+            Cruscotto
+          </button>
         </div>
 
         {/* CARD INVESTIMENTO CONSIGLIATO OTTIMIZZATA */}
@@ -656,6 +663,12 @@ export default function ProjectDetailView() {
         {activeTab === 'ruoli' && (
           <div className="bg-gray-900 border border-gray-800 p-6 rounded-2xl space-y-6">
             <ProjectGovernanceView projectId={projectId} />
+          </div>
+        )}
+
+        {activeTab === 'cruscotto' && (
+          <div className="bg-gray-900 border border-gray-800 p-6 rounded-2xl space-y-6">
+            <CruscottoProgetti />
           </div>
         )}
 

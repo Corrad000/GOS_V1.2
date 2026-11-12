@@ -1,13 +1,8 @@
-// app/cruscotto/page.tsx
-// Cruscotto di esempio: KPI, grafico ricavi vs costi, stato progetti.
-// Dipendenze: npm install recharts   (Tailwind CSS già configurato nel progetto Next.js)
-// I dati sono di prova: nella versione reale arrivano da Supabase (vedi nota in fondo).
-
 "use client";
 
 import {
-  Bar,
-  BarChart,
+  Line,
+  LineChart,
   CartesianGrid,
   Legend,
   ResponsiveContainer,
@@ -16,157 +11,132 @@ import {
   YAxis,
 } from "recharts";
 
-type Stato = "verde" | "giallo" | "rosso";
-
-type Progetto = {
-  nome: string;
-  cliente: string;
-  orePreviste: number;
-  oreConsuntivate: number;
-  margine: number; // in percentuale
-};
-
-type Kpi = {
-  label: string;
-  value: string;
-  note: string;
-  tono: "neutro" | "ok" | "attenzione";
-};
-
-// ---------- Dati di prova ----------
-
-const kpi: Kpi[] = [
-  { label: "Ricavi YTD", value: "€412k", note: "+18% vs anno precedente", tono: "ok" },
-  { label: "Margine medio", value: "34%", note: "ponderato sui ricavi", tono: "neutro" },
-  { label: "Backlog", value: "€230k", note: "contratti firmati", tono: "neutro" },
-  { label: "Utilizzo consulenti", value: "78%", note: "soglia 85%", tono: "attenzione" },
-];
-
-const mensile = [
-  { mese: "Gen", ricavi: 30, costi: 20 },
-  { mese: "Feb", ricavi: 34, costi: 22 },
-  { mese: "Mar", ricavi: 38, costi: 25 },
-  { mese: "Apr", ricavi: 36, costi: 24 },
-  { mese: "Mag", ricavi: 42, costi: 27 },
-  { mese: "Giu", ricavi: 45, costi: 29 },
-  { mese: "Lug", ricavi: 28, costi: 19 },
-  { mese: "Ago", ricavi: 20, costi: 14 },
-  { mese: "Set", ricavi: 44, costi: 28 },
-  { mese: "Ott", ricavi: 52, costi: 33 },
-];
-
-const progetti: Progetto[] = [
-  { nome: "Progetto Alfa", cliente: "Cliente X", orePreviste: 200, oreConsuntivate: 150, margine: 36 },
-  { nome: "Progetto Beta", cliente: "Cliente Y", orePreviste: 180, oreConsuntivate: 170, margine: 27 },
-  { nome: "Progetto Gamma", cliente: "Cliente Z", orePreviste: 120, oreConsuntivate: 110, margine: 12 },
-];
-
-// ---------- Regole del semaforo ----------
-// Ipotesi da validare: scostamento ore oltre il 15% o margine sotto il 15% -> rosso;
-// scostamento oltre il 5% o margine sotto il 25% -> giallo; altrimenti verde.
-
-function calcolaStato(p: Progetto): Stato {
-  // Scostamento ore: positivo = più ore consuntivate del previsto
-  const scostamento = (p.oreConsuntivate - p.orePreviste) / p.orePreviste;
-
-  if (scostamento > 0.15 || p.margine < 15) return "rosso";
-  if (scostamento > 0.05 || p.margine < 25) return "giallo";
-  return "verde";
+interface CruscottoProgettiProps {
+  projectTitle?: string;
+  financials?: {
+    pnlRows: any[];
+    cashFlowRows: any[];
+    balanceSheetRows: any[];
+    kpiRows: any[];
+  };
 }
 
-// ---------- Stili ----------
+export default function CruscottoProgetti({ projectTitle, financials }: CruscottoProgettiProps) {
+  // Estrazione dati dal motore finanziario quinquennale (se disponibili, altrimenti fallback)
+  const pnl = financials?.pnlRows || [];
+  const cashFlow = financials?.cashFlowRows || [];
+  const balanceSheet = financials?.balanceSheetRows || [];
+  const kpis = financials?.kpiRows || [];
 
-const toneKpi: Record<Kpi["tono"], string> = {
-  neutro: "text-gray-500",
-  ok: "text-green-700",
-  attenzione: "text-amber-700",
-};
+  // Ricavi e Costi per i 5 anni (per il grafico a linee)
+  const revenuesRow = pnl.find(r => r.label.includes('Valore della Produzione'))?.values || [0, 0, 0, 0, 0];
+  const ebitdaRow = pnl.find(r => r.label === 'EBITDA')?.values || [0, 0, 0, 0, 0];
+  const netIncomeRow = pnl.find(r => r.label === 'Utile Netto')?.values || [0, 0, 0, 0, 0];
 
-const coloreStato: Record<Stato, string> = {
-  verde: "bg-green-100 text-green-800",
-  giallo: "bg-amber-100 text-amber-800",
-  rosso: "bg-red-100 text-red-800",
-};
+  const chartData = [
+    { anno: 'Anno 1', ricavi: revenuesRow[0], ebitda: ebitdaRow[0], utile: netIncomeRow[0] },
+    { anno: 'Anno 2', ricavi: revenuesRow[1], ebitda: ebitdaRow[1], utile: netIncomeRow[1] },
+    { anno: 'Anno 3', ricavi: revenuesRow[2], ebitda: ebitdaRow[2], utile: netIncomeRow[2] },
+    { anno: 'Anno 4', ricavi: revenuesRow[3], ebitda: ebitdaRow[3], utile: netIncomeRow[3] },
+    { anno: 'Anno 5', ricavi: revenuesRow[4], ebitda: ebitdaRow[4], utile: netIncomeRow[4] },
+  ];
 
-const coloreBarra: Record<Stato, string> = {
-  verde: "bg-green-600",
-  giallo: "bg-amber-500",
-  rosso: "bg-red-600",
-};
+  // Risultati del 5° Anno per le Card KPI
+  const revYear5 = revenuesRow[4] || 0;
+  const netYear5 = netIncomeRow[4] || 0;
+  const cashYear5 = cashFlow.find(r => r.label.includes('Cassa alla fine'))?.values[4] || 0;
+  const totalAssetsYear5 = balanceSheet.find(r => r.label.includes('Totale Attivo'))?.values[4] || 0;
 
-// ---------- Componente ----------
-
-export default function CruscottoProgetti() {
   return (
-    <main className="mx-auto max-w-5xl space-y-6 p-4 md:p-6">
-      <h1 className="text-2xl font-medium text-gray-900">Cruscotto progetti</h1>
+    <div className="space-y-8 text-gray-100">
+      <div className="border-b border-gray-800 pb-4">
+        <h2 className="text-xl font-bold text-white uppercase tracking-tight">Cruscotto Strategico & Risultati Quinquennali</h2>
+        <p className="text-xs text-gray-400 mt-0.5">Analisi di sintesi e proiezioni di fine piano per {projectTitle || 'il progetto'}</p>
+      </div>
 
-      {/* KPI */}
-      <section className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        {kpi.map((k) => (
-          <div key={k.label} className="rounded-lg bg-gray-100 p-4">
-            <p className="text-sm text-gray-600">{k.label}</p>
-            <p className="mt-1 text-2xl font-medium text-gray-900">{k.value}</p>
-            <p className={`mt-1 text-xs ${toneKpi[k.tono]}`}>{k.note}</p>
-          </div>
-        ))}
+      {/* KPI - Risultati del 5° Anno (Conto Economico, Cassa, Stato Patrimoniale) */}
+      <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="rounded-xl bg-gray-950 border border-gray-800 p-5 space-y-1 shadow-inner">
+          <p className="text-[11px] font-mono text-gray-400 uppercase tracking-wider">Ricavi (Anno 5)</p>
+          <p className="text-2xl font-mono font-bold text-white">€ {Math.round(revYear5).toLocaleString('it-IT')}</p>
+          <p className="text-xs text-emerald-400 font-mono">Target fine piano</p>
+        </div>
+
+        <div className="rounded-xl bg-gray-950 border border-gray-800 p-5 space-y-1 shadow-inner">
+          <p className="text-[11px] font-mono text-gray-400 uppercase tracking-wider">Utile Netto (Anno 5)</p>
+          <p className="text-2xl font-mono font-bold text-amber-300">€ {Math.round(netYear5).toLocaleString('it-IT')}</p>
+          <p className="text-xs text-gray-400 font-mono">Risultato netto annuale</p>
+        </div>
+
+        <div className="rounded-xl bg-gray-950 border border-gray-800 p-5 space-y-1 shadow-inner">
+          <p className="text-[11px] font-mono text-gray-400 uppercase tracking-wider">Liquidità Finale (Cassa)</p>
+          <p className="text-2xl font-mono font-bold text-white">€ {Math.round(cashYear5).toLocaleString('it-IT')}</p>
+          <p className="text-xs text-emerald-400 font-mono">Cash flow cumulato</p>
+        </div>
+
+        <div className="rounded-xl bg-gray-950 border border-gray-800 p-5 space-y-1 shadow-inner">
+          <p className="text-[11px] font-mono text-gray-400 uppercase tracking-wider">Totale Attivo (Patrimonio)</p>
+          <p className="text-2xl font-mono font-bold text-white">€ {Math.round(totalAssetsYear5).toLocaleString('it-IT')}</p>
+          <p className="text-xs text-gray-400 font-mono">Stato Patrimoniale Anno 5</p>
+        </div>
       </section>
 
-      {/* Grafico ricavi vs costi */}
-      <section className="rounded-xl border border-gray-200 bg-white p-4">
-        <h2 className="mb-3 text-base font-medium text-gray-900">Ricavi mensili vs costi diretti (€k)</h2>
-        <div className="h-64 w-full">
+      {/* Grafico a Linee / Curve Pluriennale (Ricavi, EBITDA, Utile) */}
+      <section className="rounded-2xl border border-gray-800 bg-gray-950 p-6 space-y-4">
+        <div>
+          <h3 className="text-base font-bold text-white uppercase tracking-tight">Dinamica Pluriennale dei Flussi (€)</h3>
+          <p className="text-xs text-gray-400">Andamento quinquennale di Ricavi, EBITDA e Utile Netto</p>
+        </div>
+        <div className="h-72 w-full">
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={mensile} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-              <CartesianGrid vertical={false} stroke="#e5e7eb" />
-              <XAxis dataKey="mese" tickLine={false} axisLine={false} />
-              <YAxis tickLine={false} axisLine={false} width={36} />
-              <Tooltip />
+            <LineChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+              <CartesianGrid vertical={false} stroke="#1F2937" strokeDasharray="3 3" />
+              <XAxis dataKey="anno" tickLine={false} axisLine={false} stroke="#9CA3AF" />
+              <YAxis tickLine={false} axisLine={false} width={60} stroke="#9CA3AF" />
+              <Tooltip contentStyle={{ backgroundColor: '#111827', borderColor: '#374151', borderRadius: '0.5rem', color: '#fff' }} />
               <Legend />
-              <Bar dataKey="ricavi" name="Ricavi" fill="#378ADD" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="costi" name="Costi diretti" fill="#B4B2A9" radius={[4, 4, 0, 0]} />
-            </BarChart>
+              <Line type="monotone" dataKey="ricavi" name="Valore della Produzione" stroke="#FF5500" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+              <Line type="monotone" dataKey="ebitda" name="EBITDA" stroke="#10B981" strokeWidth={2} dot={{ r: 3 }} />
+              <Line type="monotone" dataKey="utile" name="Utile Netto" stroke="#3B82F6" strokeWidth={2} dot={{ r: 3 }} />
+            </LineChart>
           </ResponsiveContainer>
         </div>
       </section>
 
-      {/* Stato progetti */}
-      <section className="rounded-xl border border-gray-200 bg-white p-4">
-        <h2 className="mb-3 text-base font-medium text-gray-900">Stato dei progetti attivi</h2>
-        <ul className="space-y-4">
-          {progetti.map((p) => {
-            const stato = calcolaStato(p);
-            const avanzamento = Math.min(100, Math.round((p.oreConsuntivate / p.orePreviste) * 100));
+      {/* Sezione KPI in Grafico (Sostituisce i progetti attivi) */}
+      <section className="rounded-2xl border border-gray-800 bg-gray-950 p-6 space-y-6">
+        <div>
+          <h3 className="text-base font-bold text-white uppercase tracking-tight">Indicatori di Performance (KPI) del Piano</h3>
+          <p className="text-xs text-gray-400">Monitoraggio dei principali indici di redditività e sostenibilità finanziaria</p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {kpis.map((kpi: any, idx: number) => {
+            const lastVal = kpi.values?.[4] || kpi.values?.[0] || 0;
+            const displayVal = kpi.isPercentage ? `${lastVal.toFixed(1)}%` : `€ ${Math.round(lastVal).toLocaleString('it-IT')}`;
+            const barWidth = kpi.isPercentage ? Math.min(100, Math.max(5, Math.abs(lastVal))) : 75;
+
             return (
-              <li key={p.nome} className="grid grid-cols-[1fr_auto] items-center gap-x-4 gap-y-2 md:grid-cols-[2fr_1fr_auto]">
-                <div>
-                  <p className="text-sm font-medium text-gray-900">{p.nome}</p>
-                  <p className="text-xs text-gray-500">{p.cliente} · margine {p.margine}%</p>
+              <div key={idx} className="bg-gray-900 border border-gray-800 p-4 rounded-xl space-y-2">
+                <div className="flex justify-between items-center">
+                  <span className="text-xs font-bold text-gray-200">{kpi.label}</span>
+                  <span className="text-xs font-mono font-bold text-amber-300">{displayVal}</span>
                 </div>
-                <span className={`justify-self-end rounded-md px-2 py-1 text-xs font-medium ${coloreStato[stato]}`}>
-                  {stato}
-                </span>
-                <div className="col-span-2 md:col-span-1">
-                  <div className="h-2 w-full rounded bg-gray-200">
-                    <div className={`h-2 rounded ${coloreBarra[stato]}`} style={{ width: `${avanzamento}%` }} />
-                  </div>
-                  <p className="mt-1 text-xs text-gray-500">
-                    {p.oreConsuntivate} / {p.orePreviste} ore ({avanzamento}%)
-                  </p>
+                <div className="h-2 w-full rounded bg-gray-950 overflow-hidden">
+                  <div 
+                    className="h-full rounded bg-gradient-to-r from-amber-600 to-[#FF5500] transition-all duration-500" 
+                    style={{ width: `${barWidth}%` }} 
+                  />
                 </div>
-              </li>
+                <div className="flex justify-between text-[10px] font-mono text-gray-500">
+                  <span>Anno 1-4</span>
+                  <span>Target Anno 5</span>
+                </div>
+              </div>
             );
           })}
-        </ul>
-        <p className="mt-4 text-xs text-gray-500">
-          Il colore segue regole esplicite (vedi funzione calcolaStato). Le soglie sono ipotesi da validare.
-        </p>
+        </div>
       </section>
-    </main>
+    </div>
   );
 }
-
-// NOTA PER LA VERSIONE REALE
-// I valori di kpi, mensile e progetti vanno sostituiti con query a Supabase,
-// eseguite sul server (Server Component) e filtrate dalle regole RLS del ruolo.
-// I totali (ricavi, margini, backlog) conviene calcolarli in viste SQL.

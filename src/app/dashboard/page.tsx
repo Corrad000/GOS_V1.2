@@ -2,6 +2,7 @@ import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { UserDashboardView } from '@/app/components/UserDashboardView';
+import { SystemActivityWidget } from '@/app/components/SystemActivityWidget';
 
 export default async function AdminDashboardPage() {
   const cookieStore = await cookies();
@@ -55,10 +56,20 @@ export default async function AdminDashboardPage() {
   }
 
   return (
-    <UserDashboardView
-      userRole={userRole}
-      userName={userName}
-      companies={companiesList}
-    />
+    <div className="min-h-screen bg-gray-950 text-gray-100 space-y-10 p-6 md:p-10">
+      <div className="max-w-7xl mx-auto space-y-10">
+        
+        {/* Vista principale della dashboard utente / admin */}
+        <UserDashboardView
+          userRole={userRole}
+          userName={userName}
+          companies={companiesList}
+        />
+        
+        {/* Widget di monitoraggio e log di sistema in tempo reale */}
+        <SystemActivityWidget />
+
+      </div>
+    </div>
   );
 }
