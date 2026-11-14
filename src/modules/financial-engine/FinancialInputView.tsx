@@ -14,6 +14,18 @@ export interface DynamicCostItem {
   amounts: [number, number, number, number, number];
 }
 
+export interface CommissionItem {
+  label: string;
+  percentage: number; // Percentuale di riferimento (%)
+  amounts: [number, number, number, number, number]; // Valori economici calcolati in € per anno
+}
+
+export interface BonusItem {
+  label: string;
+  percentage: number; // Percentuale di riferimento (%) sul fatturato
+  amounts: [number, number, number, number, number]; // Valori economici calcolati in € per anno
+}
+
 interface FinancialInputProps {
   products: ProductItem[];
   setProducts: React.Dispatch<React.SetStateAction<ProductItem[]>>;
@@ -25,6 +37,10 @@ interface FinancialInputProps {
   setCapexItems: React.Dispatch<React.SetStateAction<DynamicCostItem[]>>;
   opexItems: DynamicCostItem[];
   setOpexItems: React.Dispatch<React.SetStateAction<DynamicCostItem[]>>;
+  commissionItems: CommissionItem[];
+  setCommissionItems: React.Dispatch<React.SetStateAction<CommissionItem[]>>;
+  bonusItems: BonusItem[];
+  setBonusItems: React.Dispatch<React.SetStateAction<BonusItem[]>>;
   corporateTaxRate: number;
   setCorporateTaxRate: (val: number) => void;
   employeeTaxRate: number;
@@ -50,6 +66,10 @@ export function FinancialInputView({
   setCapexItems,
   opexItems,
   setOpexItems,
+  commissionItems = [],
+  setCommissionItems,
+  bonusItems = [],
+  setBonusItems,
   corporateTaxRate,
   setCorporateTaxRate,
   employeeTaxRate,
@@ -72,8 +92,20 @@ export function FinancialInputView({
   const safeStaffCosts = staffCostsItems || [];
   const safeOpex = opexItems || [];
   const safeCapex = capexItems || [];
+  const safeCommissions = commissionItems || [];
+  const safeBonuses = bonusItems || [];
 
-  // Calcoli quinquennali (Anni 1-5)
+  const handleFocus = (e: React.FocusEvent<HTMLInputElement>) => {
+    if (e.target.value === '0') {
+      e.target.value = '';
+    } else {
+      e.target.select();
+    }
+  };
+
+  const noSpin = "[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none";
+
+  // Calcoli quinquennali (Anni 1-5) dei ricavi
   const yearsCount = 5;
   const yearlyRevenues = Array(yearsCount).fill(0);
   const yearlyCOGS = Array(yearsCount).fill(0);
@@ -106,7 +138,7 @@ export function FinancialInputView({
       {/* BARRA SUPERIORE */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 border-b border-gray-800 pb-3">
         <div>
-          <h3 className="text-sm font-bold text-white">Modello di Calcolo Prodotti, Ricavi e Costi</h3>
+          <h3 className="text-sm font-bold text-white">Modello di Calcolo Prodotti, Ricavi, Costi e Provvigioni</h3>
           <p className="text-[11px] text-gray-400">Gestione centralizzata dei driver di input per il piano quinquennale.</p>
         </div>
 
@@ -128,7 +160,7 @@ export function FinancialInputView({
           <button
             onClick={onSave}
             disabled={saving}
-            className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-md disabled:opacity-50"
+            className="px-3.5 py-1.5 bg-[#FF5500] hover:bg-orange-600 text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-md disabled:opacity-50 uppercase tracking-wider"
           >
             {saving ? 'Salvataggio...' : 'Salva & Ricalcola'}
           </button>
@@ -144,8 +176,9 @@ export function FinancialInputView({
             <input
               type="number"
               value={corporateTaxRate}
+              onFocus={handleFocus}
               onChange={(e) => setCorporateTaxRate(Number(e.target.value))}
-              className="w-full bg-gray-900 border border-gray-800 rounded px-3 py-1.5 text-white text-xs font-mono"
+              className={`w-full bg-gray-900 border border-gray-800 rounded px-3 py-1.5 text-white text-xs font-mono ${noSpin}`}
             />
             <p className="text-[10px] text-gray-500">Applicata sull'Utile Ante Tasse (EBT) quando positivo.</p>
           </div>
@@ -155,8 +188,9 @@ export function FinancialInputView({
             <input
               type="number"
               value={employeeTaxRate}
+              onFocus={handleFocus}
               onChange={(e) => setEmployeeTaxRate(Number(e.target.value))}
-              className="w-full bg-gray-900 border border-gray-800 rounded px-3 py-1.5 text-white text-xs font-mono"
+              className={`w-full bg-gray-900 border border-gray-800 rounded px-3 py-1.5 text-white text-xs font-mono ${noSpin}`}
             />
             <p className="text-[10px] text-gray-500">Percentuale aggiunta automaticamente al costo del personale.</p>
           </div>
@@ -192,7 +226,7 @@ export function FinancialInputView({
           <h4 className="text-xs font-bold text-white uppercase tracking-wider">Product Sold in Pieces (Quantità)</h4>
           <button
             onClick={() => setProducts([...safeProducts, { name: 'Nuovo Prodotto', pieces: [0, 0, 0, 0, 0], prices: [0, 0, 0, 0, 0], unitCosts: [0, 0, 0, 0, 0] }])}
-            className="px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-bold rounded-lg transition-all cursor-pointer"
+            className="px-3.5 py-1.5 bg-[#FF5500] hover:bg-orange-600 text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-md uppercase tracking-wider"
           >
             + Aggiungi Prodotto
           </button>
@@ -231,6 +265,7 @@ export function FinancialInputView({
                       <input
                         type="number"
                         value={p?.pieces?.[yearIdx] || 0}
+                        onFocus={handleFocus}
                         onChange={(e) => {
                           const updated = [...safeProducts];
                           const newPieces = [...updated[idx].pieces] as [number, number, number, number, number];
@@ -238,7 +273,7 @@ export function FinancialInputView({
                           updated[idx] = { ...updated[idx], pieces: newPieces };
                           setProducts(updated);
                         }}
-                        className="w-24 bg-gray-900 border border-gray-800 rounded px-2 py-1 text-center text-white text-xs font-mono"
+                        className={`w-24 bg-gray-900 border border-gray-800 rounded px-2 py-1 text-center text-white text-xs font-mono ${noSpin}`}
                       />
                     </td>
                   ))}
@@ -282,6 +317,7 @@ export function FinancialInputView({
                       <input
                         type="number"
                         value={p?.prices?.[yearIdx] || 0}
+                        onFocus={handleFocus}
                         onChange={(e) => {
                           const updated = [...safeProducts];
                           const newPrices = [...updated[idx].prices] as [number, number, number, number, number];
@@ -289,7 +325,7 @@ export function FinancialInputView({
                           updated[idx] = { ...updated[idx], prices: newPrices };
                           setProducts(updated);
                         }}
-                        className="w-24 bg-gray-900 border border-amber-900/40 rounded px-2 py-1 text-center text-white text-xs font-mono"
+                        className={`w-24 bg-gray-900 border border-amber-900/40 rounded px-2 py-1 text-center text-white text-xs font-mono ${noSpin}`}
                       />
                     </td>
                   ))}
@@ -326,6 +362,7 @@ export function FinancialInputView({
                       <input
                         type="number"
                         value={p?.unitCosts?.[yearIdx] || 0}
+                        onFocus={handleFocus}
                         onChange={(e) => {
                           const updated = [...safeProducts];
                           const newUnitCosts = [...updated[idx].unitCosts] as [number, number, number, number, number];
@@ -333,7 +370,7 @@ export function FinancialInputView({
                           updated[idx] = { ...updated[idx], unitCosts: newUnitCosts };
                           setProducts(updated);
                         }}
-                        className="w-24 bg-gray-900 border border-gray-800 rounded px-2 py-1 text-center text-white text-xs font-mono"
+                        className={`w-24 bg-gray-900 border border-gray-800 rounded px-2 py-1 text-center text-white text-xs font-mono ${noSpin}`}
                       />
                     </td>
                   ))}
@@ -345,7 +382,199 @@ export function FinancialInputView({
         </div>
       </div>
 
-      {/* 4. COSTO DEL PERSONALE */}
+      {/* 4. PROVVIGIONI COMMERCIALI (% SUI RICAVI) */}
+      <div className="space-y-3 bg-gray-950 border border-gray-800 p-4 rounded-xl">
+        <div className="flex justify-between items-center">
+          <div>
+            <h4 className="text-xs font-bold text-amber-400 uppercase tracking-wider">Provvigioni Commerciali (% sui Ricavi)</h4>
+            <p className="text-[11px] text-gray-400">Percentuale di riferimento applicata automaticamente sul fatturato totale di ogni anno.</p>
+          </div>
+          <button
+            onClick={() => {
+              const defaultPct = 10;
+              const newAmounts = yearlyRevenues.map(rev => rev * (defaultPct / 100)) as [number, number, number, number, number];
+              setCommissionItems([...safeCommissions, { label: 'Provvigioni Rete / Commerciali', percentage: defaultPct, amounts: newAmounts }]);
+            }}
+            className="px-3.5 py-1.5 bg-[#FF5500] hover:bg-orange-600 text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-md uppercase tracking-wider"
+          >
+            + Aggiungi Voce Provvigioni
+          </button>
+        </div>
+
+        <div className="overflow-x-auto pt-1">
+          <table className="w-full text-left text-xs table-fixed">
+            <thead className="bg-gray-900 text-gray-400 uppercase text-[10px]">
+              <tr>
+                <th className="py-2 px-3">Voce / Categoria</th>
+                <th className="py-2 px-3 text-center w-28">Riferimento (%)</th>
+                <th className="py-2 px-3 text-center w-28">Anno 1 ({currencySymbol})</th>
+                <th className="py-2 px-3 text-center w-28">Anno 2 ({currencySymbol})</th>
+                <th className="py-2 px-3 text-center w-28">Anno 3 ({currencySymbol})</th>
+                <th className="py-2 px-3 text-center w-28">Anno 4 ({currencySymbol})</th>
+                <th className="py-2 px-3 text-center w-28">Anno 5 ({currencySymbol})</th>
+                <th className="py-2 px-3 text-center w-20">Azioni</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-900">
+              {safeCommissions.map((comm, idx) => (
+                <tr key={idx}>
+                  <td className="py-2 px-3">
+                    <input
+                      type="text"
+                      value={comm?.label || ''}
+                      onChange={(e) => {
+                        const updated = [...safeCommissions];
+                        updated[idx] = { ...updated[idx], label: e.target.value };
+                        setCommissionItems(updated);
+                      }}
+                      className="w-full bg-gray-900 border border-gray-800 rounded px-2.5 py-1.5 text-white text-xs"
+                    />
+                  </td>
+                  <td className="py-2 px-3 text-center">
+                    <input
+                      type="number"
+                      value={comm?.percentage ?? 10}
+                      onFocus={handleFocus}
+                      onChange={(e) => {
+                        const val = Number(e.target.value);
+                        const updated = [...safeCommissions];
+                        const recalculatedAmounts = yearlyRevenues.map(rev => rev * (val / 100)) as [number, number, number, number, number];
+                        updated[idx] = { ...updated[idx], percentage: val, amounts: recalculatedAmounts };
+                        setCommissionItems(updated);
+                      }}
+                      className={`w-24 bg-gray-900 border border-amber-500/50 rounded px-2 py-1.5 text-center text-amber-400 text-xs font-mono font-bold ${noSpin}`}
+                      title="Modifica la percentuale di riferimento per ricalcolare tutti gli anni"
+                    />
+                  </td>
+                  {[0, 1, 2, 3, 4].map((y) => (
+                    <td key={y} className="py-2 px-3 text-center">
+                      <input
+                        type="number"
+                        value={Math.round(comm?.amounts?.[y] || 0)}
+                        onFocus={handleFocus}
+                        onChange={(e) => {
+                          const updated = [...safeCommissions];
+                          const newAmounts = [...updated[idx].amounts] as [number, number, number, number, number];
+                          newAmounts[y] = Number(e.target.value);
+                          updated[idx] = { ...updated[idx], amounts: newAmounts };
+                          setCommissionItems(updated);
+                        }}
+                        className={`w-24 bg-gray-900 border border-gray-800 rounded px-2 py-1.5 text-center text-amber-300 text-xs font-mono font-bold ${noSpin}`}
+                      />
+                    </td>
+                  ))}
+                  <td className="py-2 px-3 text-center">
+                    <button
+                      onClick={() => setCommissionItems(safeCommissions.filter((_, i) => i !== idx))}
+                      className="px-2.5 py-1.5 bg-red-950 text-red-400 text-xs rounded hover:bg-red-900 cursor-pointer"
+                    >
+                      🗑️
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* 5. PREMI & BONUS DI RISULTATO (% SUI RICAVI) */}
+      <div className="space-y-3 bg-gray-950 border border-gray-800 p-4 rounded-xl">
+        <div className="flex justify-between items-center">
+          <div>
+            <h4 className="text-xs font-bold text-amber-400 uppercase tracking-wider">Premi & Bonus di Risultato (% sui Ricavi)</h4>
+            <p className="text-[11px] text-gray-400">Percentuale di bonus calcolata automaticamente sul fatturato totale di ogni anno.</p>
+          </div>
+          <button
+            onClick={() => {
+              const defaultPct = 5;
+              const newAmounts = yearlyRevenues.map(rev => rev * (defaultPct / 100)) as [number, number, number, number, number];
+              setBonusItems([...safeBonuses, { label: 'Bonus Target Annuale', percentage: defaultPct, amounts: newAmounts }]);
+            }}
+            className="px-3.5 py-1.5 bg-[#FF5500] hover:bg-orange-600 text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-md uppercase tracking-wider"
+          >
+            + Aggiungi Premio / Bonus
+          </button>
+        </div>
+
+        <div className="overflow-x-auto pt-1">
+          <table className="w-full text-left text-xs table-fixed">
+            <thead className="bg-gray-900 text-gray-400 uppercase text-[10px]">
+              <tr>
+                <th className="py-2 px-3">Voce Premio / Bonus</th>
+                <th className="py-2 px-3 text-center w-28">Riferimento (%)</th>
+                <th className="py-2 px-3 text-center w-28">Anno 1 ({currencySymbol})</th>
+                <th className="py-2 px-3 text-center w-28">Anno 2 ({currencySymbol})</th>
+                <th className="py-2 px-3 text-center w-28">Anno 3 ({currencySymbol})</th>
+                <th className="py-2 px-3 text-center w-28">Anno 4 ({currencySymbol})</th>
+                <th className="py-2 px-3 text-center w-28">Anno 5 ({currencySymbol})</th>
+                <th className="py-2 px-3 text-center w-20">Azioni</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-900">
+              {safeBonuses.map((bonus, idx) => (
+                <tr key={idx}>
+                  <td className="py-2 px-3">
+                    <input
+                      type="text"
+                      value={bonus?.label || ''}
+                      onChange={(e) => {
+                        const updated = [...safeBonuses];
+                        updated[idx] = { ...updated[idx], label: e.target.value };
+                        setBonusItems(updated);
+                      }}
+                      className="w-full bg-gray-900 border border-gray-800 rounded px-2.5 py-1.5 text-white text-xs"
+                    />
+                  </td>
+                  <td className="py-2 px-3 text-center">
+                    <input
+                      type="number"
+                      value={bonus?.percentage ?? 5}
+                      onFocus={handleFocus}
+                      onChange={(e) => {
+                        const val = Number(e.target.value);
+                        const updated = [...safeBonuses];
+                        const recalculatedAmounts = yearlyRevenues.map(rev => rev * (val / 100)) as [number, number, number, number, number];
+                        updated[idx] = { ...updated[idx], percentage: val, amounts: recalculatedAmounts };
+                        setBonusItems(updated);
+                      }}
+                      className={`w-24 bg-gray-900 border border-amber-500/50 rounded px-2 py-1.5 text-center text-amber-400 text-xs font-mono font-bold ${noSpin}`}
+                      title="Modifica la percentuale di riferimento per ricalcolare tutti gli anni"
+                    />
+                  </td>
+                  {[0, 1, 2, 3, 4].map((y) => (
+                    <td key={y} className="py-2 px-3 text-center">
+                      <input
+                        type="number"
+                        value={Math.round(bonus?.amounts?.[y] || 0)}
+                        onFocus={handleFocus}
+                        onChange={(e) => {
+                          const updated = [...safeBonuses];
+                          const newAmounts = [...updated[idx].amounts] as [number, number, number, number, number];
+                          newAmounts[y] = Number(e.target.value);
+                          updated[idx] = { ...updated[idx], amounts: newAmounts };
+                          setBonusItems(updated);
+                        }}
+                        className={`w-24 bg-gray-900 border border-gray-800 rounded px-2 py-1.5 text-center text-amber-300 text-xs font-mono font-bold ${noSpin}`}
+                      />
+                    </td>
+                  ))}
+                  <td className="py-2 px-3 text-center">
+                    <button
+                      onClick={() => setBonusItems(safeBonuses.filter((_, i) => i !== idx))}
+                      className="px-2.5 py-1.5 bg-red-950 text-red-400 text-xs rounded hover:bg-red-900 cursor-pointer"
+                    >
+                      🗑️
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* 6. COSTO DEL PERSONALE */}
       <div className="space-y-3 bg-gray-950 border border-gray-800 p-4 rounded-xl">
         <div className="flex justify-between items-center">
           <div>
@@ -353,8 +582,8 @@ export function FinancialInputView({
             <p className="text-[11px] text-gray-400">Gestione strutturata delle risorse umane e dei contributi previdenziali.</p>
           </div>
           <button
-            onClick={() => setStaffCostsItems([...safeStaffCosts, { label: 'Nuova Risorsa / Reparto', amounts: [25000, 26000, 27000, 28000, 29000] }])}
-            className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold rounded-lg transition-all cursor-pointer"
+            onClick={() => setStaffCostsItems([...safeStaffCosts, { label: 'Nuova Risorsa / Reparto', amounts: [0, 0, 0, 0, 0] }])}
+            className="px-3.5 py-1.5 bg-[#FF5500] hover:bg-orange-600 text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-md uppercase tracking-wider"
           >
             + Aggiungi Voce Personale
           </button>
@@ -393,6 +622,7 @@ export function FinancialInputView({
                       <input
                         type="number"
                         value={sc?.amounts?.[y] || 0}
+                        onFocus={handleFocus}
                         onChange={(e) => {
                           const updated = [...safeStaffCosts];
                           const newAmounts = [...updated[idx].amounts] as [number, number, number, number, number];
@@ -400,7 +630,7 @@ export function FinancialInputView({
                           updated[idx] = { ...updated[idx], amounts: newAmounts };
                           setStaffCostsItems(updated);
                         }}
-                        className="w-24 bg-gray-900 border border-gray-800 rounded px-2 py-1.5 text-center text-white text-xs font-mono"
+                        className={`w-24 bg-gray-900 border border-gray-800 rounded px-2 py-1.5 text-center text-white text-xs font-mono ${noSpin}`}
                       />
                     </td>
                   ))}
@@ -419,15 +649,15 @@ export function FinancialInputView({
         </div>
       </div>
 
-      {/* 5. OPEX */}
+      {/* 7. OPEX */}
       <div className="space-y-3 bg-gray-950 border border-gray-800 p-4 rounded-xl">
         <div className="flex justify-between items-center">
           <div>
             <h4 className="text-xs font-bold text-white uppercase tracking-wider">OPEX — Costi Operativi</h4>
           </div>
           <button
-            onClick={() => setOpexItems([...safeOpex, { label: 'Nuovo Costo OPEX', amounts: [10000, 10500, 11000, 11500, 12000] }])}
-            className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold rounded-lg transition-all cursor-pointer"
+            onClick={() => setOpexItems([...safeOpex, { label: 'Nuovo Costo OPEX', amounts: [0, 0, 0, 0, 0] }])}
+            className="px-3.5 py-1.5 bg-[#FF5500] hover:bg-orange-600 text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-md uppercase tracking-wider"
           >
             + Aggiungi Voce OPEX
           </button>
@@ -466,6 +696,7 @@ export function FinancialInputView({
                       <input
                         type="number"
                         value={op?.amounts?.[y] || 0}
+                        onFocus={handleFocus}
                         onChange={(e) => {
                           const updated = [...safeOpex];
                           const newAmounts = [...updated[idx].amounts] as [number, number, number, number, number];
@@ -473,7 +704,7 @@ export function FinancialInputView({
                           updated[idx] = { ...updated[idx], amounts: newAmounts };
                           setOpexItems(updated);
                         }}
-                        className="w-24 bg-gray-900 border border-gray-800 rounded px-2 py-1.5 text-center text-white text-xs font-mono"
+                        className={`w-24 bg-gray-900 border border-gray-800 rounded px-2 py-1.5 text-center text-white text-xs font-mono ${noSpin}`}
                       />
                     </td>
                   ))}
@@ -492,15 +723,15 @@ export function FinancialInputView({
         </div>
       </div>
 
-      {/* 6. CAPEX */}
+      {/* 8. CAPEX */}
       <div className="space-y-3 bg-gray-950 border border-gray-800 p-4 rounded-xl">
         <div className="flex justify-between items-center">
           <div>
             <h4 className="text-xs font-bold text-white uppercase tracking-wider">CAPEX — Investimenti</h4>
           </div>
           <button
-            onClick={() => setCapexItems([...safeCapex, { label: 'Nuovo Investimento CAPEX', amounts: [20000, 0, 10000, 0, 5000] }])}
-            className="px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-bold rounded-lg transition-all cursor-pointer"
+            onClick={() => setCapexItems([...safeCapex, { label: 'Nuovo Investimento CAPEX', amounts: [0, 0, 0, 0, 0] }])}
+            className="px-3.5 py-1.5 bg-[#FF5500] hover:bg-orange-600 text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-md uppercase tracking-wider"
           >
             + Aggiungi Voce CAPEX
           </button>
@@ -539,6 +770,7 @@ export function FinancialInputView({
                       <input
                         type="number"
                         value={cx?.amounts?.[y] || 0}
+                        onFocus={handleFocus}
                         onChange={(e) => {
                           const updated = [...safeCapex];
                           const newAmounts = [...updated[idx].amounts] as [number, number, number, number, number];
@@ -546,7 +778,7 @@ export function FinancialInputView({
                           updated[idx] = { ...updated[idx], amounts: newAmounts };
                           setCapexItems(updated);
                         }}
-                        className="w-24 bg-gray-900 border border-gray-800 rounded px-2 py-1.5 text-center text-white text-xs font-mono"
+                        className={`w-24 bg-gray-900 border border-gray-800 rounded px-2 py-1.5 text-center text-white text-xs font-mono ${noSpin}`}
                       />
                     </td>
                   ))}

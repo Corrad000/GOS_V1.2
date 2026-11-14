@@ -27,18 +27,23 @@ export default function HomePage() {
 
     try {
       if (isSignUp) {
-        // REGISTRAZIONE NUOVO UTENTE
+        // REGISTRAZIONE NUOVO UTENTE CON REDIRECT DINAMICO AL DOMINIO ATTIVO
+        const redirectUrl = typeof window !== 'undefined' 
+          ? `${window.location.origin}/` 
+          : 'https://gos-v1-2-livid.vercel.app/';
+
         const { error } = await supabase.auth.signUp({
           email,
           password,
           options: {
             data: { full_name: fullName },
+            emailRedirectTo: redirectUrl,
           },
         });
 
         if (error) throw error;
 
-        setSuccessMsg('Registrazione completata! Effettua ora il login.');
+        setSuccessMsg('Registrazione completata! Controlla la tua email per confermare l’account ed effettua il login.');
         setIsSignUp(false);
       } else {
         // LOGIN UTENTE ESISTENTE
@@ -54,7 +59,11 @@ export default function HomePage() {
       }
     } catch (err: any) {
       console.error('Errore autenticazione:', err.message);
-      setErrorMsg(err.message === 'Invalid login credentials' ? 'Credenziali non valide. Verifica email e password.' : err.message);
+      setErrorMsg(
+        err.message === 'Invalid login credentials'
+          ? 'Credenziali non valide. Verifica email e password.'
+          : err.message
+      );
     } finally {
       setLoading(false);
     }

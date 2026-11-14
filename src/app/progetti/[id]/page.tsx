@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
-import { FinancialInputView, ProductItem, DynamicCostItem } from '@/modules/financial-engine/FinancialInputView';
+import { FinancialInputView, ProductItem, DynamicCostItem, CommissionItem, BonusItem } from '@/modules/financial-engine/FinancialInputView';
 import { KeyMetricsView, KpiRowData } from '@/modules/financial-engine/KeyMetricsView';
 import { KpiGuideView } from '@/modules/financial-engine/KpiGuideView';
 import { ProfitAndLossView, PnLRowData } from '@/modules/financial-engine/ProfitAndLossView';
@@ -113,6 +113,8 @@ export default function ProjectDetailView() {
   const [staffCostsItems, setStaffCostsItems] = useState<DynamicCostItem[]>([]);
   const [capexItems, setCapexItems] = useState<DynamicCostItem[]>([]);
   const [opexItems, setOpexItems] = useState<DynamicCostItem[]>([]);
+  const [commissionItems, setCommissionItems] = useState<CommissionItem[]>([]);
+  const [bonusItems, setBonusItems] = useState<BonusItem[]>([]);
 
   const [corporateTaxRate, setCorporateTaxRate] = useState<number>(24);
   const [employeeTaxRate, setEmployeeTaxRate] = useState<number>(30);
@@ -205,6 +207,21 @@ export default function ProjectDetailView() {
       }
     });
 
+    // Somma dei valori economici in euro (€) di provvigioni e bonus percentuali all'interno degli OPEX
+    for (let yr = 0; yr < yearsCount; yr++) {
+      let yrComm = 0;
+      (commissionItems || []).forEach((comm) => {
+        yrComm += Number(comm?.amounts?.[yr] || 0);
+      });
+
+      let yrBonus = 0;
+      (bonusItems || []).forEach((bon) => {
+        yrBonus += Number(bon?.amounts?.[yr] || 0);
+      });
+
+      operationalCosts[yr] += yrComm + yrBonus;
+    }
+
     (capexItems || []).forEach((cx) => {
       for (let i = 0; i < yearsCount; i++) {
         capexTotal[i] += Number(cx?.amounts?.[i] || 0);
@@ -243,7 +260,7 @@ export default function ProjectDetailView() {
       { label: 'Valore della Produzione (Ricavi)', values: revenues },
       { label: 'Costi Operativi (COGS)', values: cogs, isNegative: true },
       { label: 'Costi del Personale (incl. oneri)', values: staffCosts, isNegative: true },
-      { label: 'Costi Operativi (OPEX)', values: operationalCosts, isNegative: true },
+      { label: 'Costi Operativi (OPEX, Provvigioni & Bonus)', values: operationalCosts, isNegative: true },
       { label: 'EBITDA', values: ebitda, isSubtotal: true },
       { label: 'Ammortamenti', values: yearlyDepreciation, isNegative: true },
       { label: 'EBIT (Risultato Operativo)', values: ebit, isSubtotal: true },
@@ -352,7 +369,7 @@ export default function ProjectDetailView() {
     ];
 
     return { pnlRows, kpiRows, cashFlowRows, balanceSheetRows, recommendedInvestment };
-  }, [products, generalProductionCosts, staffCostsItems, opexItems, capexItems, depreciation, financialIncome, financialExpenses, corporateTaxRate, employeeTaxRate, loans]);
+  }, [products, generalProductionCosts, staffCostsItems, opexItems, commissionItems, bonusItems, capexItems, depreciation, financialIncome, financialExpenses, corporateTaxRate, employeeTaxRate, loans]);
 
   const handleStatusChange = async (newStatus: EntityStatus) => {
     setProjectData((prev: any) => ({ ...prev, stato: newStatus }));
@@ -559,7 +576,6 @@ export default function ProjectDetailView() {
         {activeTab === 'input' && (
           <div className="bg-gradient-to-r from-gray-900 via-gray-900 to-amber-950/30 border border-amber-500/40 p-6 rounded-2xl shadow-xl space-y-4 md:space-y-0 md:flex md:items-center md:justify-between gap-6">
             
-            {/* Sezione Testuale */}
             <div className="space-y-2 max-w-3xl">
               <div className="flex items-center gap-2">
                 <span className="inline-flex items-center px-2.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-400 uppercase tracking-widest border border-amber-500/30">
@@ -588,7 +604,6 @@ export default function ProjectDetailView() {
               </div>
             </div>
 
-            {/* Box Cifra in Evidenza */}
             <div className="flex-shrink-0">
               <div className="bg-gray-950 border border-amber-500/50 px-6 py-4 rounded-xl text-center md:text-right shadow-inner">
                 <span className="text-[10px] text-amber-400 uppercase tracking-widest font-mono block">Capitale Totale Stimato</span>
@@ -614,6 +629,10 @@ export default function ProjectDetailView() {
             setCapexItems={setCapexItems}
             opexItems={opexItems}
             setOpexItems={setOpexItems}
+            commissionItems={commissionItems}
+            setCommissionItems={setCommissionItems}
+            bonusItems={bonusItems}
+            setBonusItems={setBonusItems}
             corporateTaxRate={corporateTaxRate}
             setCorporateTaxRate={setCorporateTaxRate}
             employeeTaxRate={employeeTaxRate}
@@ -668,7 +687,15 @@ export default function ProjectDetailView() {
 
         {activeTab === 'cruscotto' && (
           <div className="bg-gray-900 border border-gray-800 p-6 rounded-2xl space-y-6">
-            <CruscottoProgetti />
+            <CruscottoProgetti
+              projectTitle={projectData.titolo}
+              financials={{
+                pnlRows: calculatedFinancials.pnlRows,
+                cashFlowRows: calculatedFinancials.cashFlowRows,
+                balanceSheetRows: calculatedFinancials.balanceSheetRows,
+                kpiRows: calculatedFinancials.kpiRows,
+              }}
+            />
           </div>
         )}
 
