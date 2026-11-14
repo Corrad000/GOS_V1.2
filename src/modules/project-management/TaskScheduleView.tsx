@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { createBrowserClient } from '@supabase/ssr';
+import { TaskTimelineInfographic } from '@/modules/reports/TaskTimelineInfographic';
 
 export interface SubTaskItem {
   id: string;
@@ -55,6 +56,9 @@ const mapUiPriorityToDb = (priority: 'ALTA' | 'MEDIA' | 'BASSA'): string => {
   return 'media';
 };
 
+// ==========================================
+// COMPONENTE PRINCIPALE TASK SCHEDULE VIEW
+// ==========================================
 export function TaskScheduleView({ projectId }: TaskScheduleProps) {
   const [currency, setCurrency] = useState<string>('EUR');
   const [currencySymbol, setCurrencySymbol] = useState<string>('€');
@@ -63,7 +67,9 @@ export function TaskScheduleView({ projectId }: TaskScheduleProps) {
   const [savingTask, setSavingTask] = useState<boolean>(false);
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
 
-  // Form nuovo task principale
+  // Toggle vista: 'timeline' (default avanzata) o 'table'
+  const [viewMode, setViewMode] = useState<'table' | 'timeline'>('timeline');
+
   const [isAdding, setIsAdding] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newDescription, setNewDescription] = useState('');
@@ -74,7 +80,6 @@ export function TaskScheduleView({ projectId }: TaskScheduleProps) {
   const [newActual, setNewActual] = useState<number>(0);
   const [newPriority, setNewPriority] = useState<'ALTA' | 'MEDIA' | 'BASSA'>('MEDIA');
 
-  // Form inserimento subtask
   const [activeSubtaskInput, setActiveSubtaskInput] = useState<string | null>(null);
   const [subTitle, setSubTitle] = useState('');
   const [subAssignee, setSubAssignee] = useState('');
@@ -86,7 +91,6 @@ export function TaskScheduleView({ projectId }: TaskScheduleProps) {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
 
-  // Caricamento reale dei task e subtask da Supabase
   const fetchTasks = useCallback(async () => {
     if (!projectId) return;
     setLoadingTasks(true);
@@ -157,7 +161,6 @@ export function TaskScheduleView({ projectId }: TaskScheduleProps) {
     return diffDays > 0 ? diffDays : 1;
   };
 
-  // --- CALCOLO GIORNI TOTALI NETTI (MERGE INTERVALS SENZA SOVRAPPOSIZIONI) ---
   const calculateTotalNetDays = () => {
     const allIntervals: { start: number; end: number }[] = [];
 
@@ -200,7 +203,6 @@ export function TaskScheduleView({ projectId }: TaskScheduleProps) {
     return totalNetDays;
   };
 
-  // --- SALVATAGGIO NUOVO TASK PRINCIPALE SU SUPABASE ---
   const handleAddTask = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTitle.trim()) return;
@@ -263,7 +265,6 @@ export function TaskScheduleView({ projectId }: TaskScheduleProps) {
     }
   };
 
-  // --- AGGIORNAMENTO CAMPO TASK PRINCIPALE SU SUPABASE ---
   const updateTaskField = async (id: string, field: keyof TaskItem, value: any) => {
     setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, [field]: value } : t)));
 
@@ -287,7 +288,6 @@ export function TaskScheduleView({ projectId }: TaskScheduleProps) {
     }
   };
 
-  // --- ELIMINAZIONE TASK PRINCIPALE SU SUPABASE ---
   const deleteTask = async (id: string) => {
     const previous = [...tasks];
     setTasks((prev) => prev.filter((t) => t.id !== id));
@@ -302,7 +302,6 @@ export function TaskScheduleView({ projectId }: TaskScheduleProps) {
     }
   };
 
-  // --- SALVATAGGIO NUOVO SUBTASK SU SUPABASE ---
   const handleAddSubtask = async (taskId: string) => {
     if (!subTitle.trim()) return;
     setSavingTask(true);
@@ -356,7 +355,6 @@ export function TaskScheduleView({ projectId }: TaskScheduleProps) {
     }
   };
 
-  // --- AGGIORNAMENTO CAMPO SUBTASK SU SUPABASE ---
   const updateSubtaskField = async (taskId: string, subId: string, field: keyof SubTaskItem, value: any) => {
     setTasks((prev) =>
       prev.map((t) => {
@@ -384,7 +382,6 @@ export function TaskScheduleView({ projectId }: TaskScheduleProps) {
     }
   };
 
-  // --- ELIMINAZIONE SUBTASK SU SUPABASE ---
   const deleteSubtask = async (taskId: string, subId: string) => {
     const previous = [...tasks];
     setTasks((prev) =>
@@ -401,7 +398,6 @@ export function TaskScheduleView({ projectId }: TaskScheduleProps) {
     }
   };
 
-  // --- CALCOLI CRUSCOTTO KPI ---
   const totalNetDays = calculateTotalNetDays();
   const totalEstimatedBudget = tasks.reduce((acc, t) => acc + t.estimatedBudget, 0);
   const totalActualCost = tasks.reduce((acc, t) => acc + t.actualCost, 0);
@@ -427,14 +423,30 @@ export function TaskScheduleView({ projectId }: TaskScheduleProps) {
 
   return (
     <div className="space-y-8">
-      {/* HEADER, SELETTORE VALUTA E PULSANTE NUOVO TASK */}
+      {/* HEADER, SELETTORE VISTA (TIMELINE vs TABELLA), VALUTA E PULSANTE NUOVO TASK */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-gray-800 pb-4">
         <div>
           <h3 className="text-base font-bold text-white uppercase tracking-wider">Cronoprogramma & Task Operativi</h3>
           <p className="text-xs text-gray-400">Pianificazione temporale, monitoraggio budget e subtask ({projectId}).</p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          {/* TOGGLE VISTA */}
+          <div className="flex items-center bg-gray-950 border border-gray-800 p-1 rounded-xl text-xs">
+            <button
+              onClick={() => setViewMode('timeline')}
+              className={`px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${viewMode === 'timeline' ? 'bg-cyan-600 text-white shadow' : 'text-gray-400 hover:text-white'}`}
+            >
+              📈 Timeline Grafica
+            </button>
+            <button
+              onClick={() => setViewMode('table')}
+              className={`px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${viewMode === 'table' ? 'bg-cyan-600 text-white shadow' : 'text-gray-400 hover:text-white'}`}
+            >
+              📋 Gestione Tabellare
+            </button>
+          </div>
+
           <div className="flex items-center gap-2 bg-gray-950 border border-gray-800 px-3 py-1.5 rounded-xl text-xs">
             <span className="text-gray-400 font-bold">Valuta:</span>
             <select
@@ -611,9 +623,11 @@ export function TaskScheduleView({ projectId }: TaskScheduleProps) {
         </form>
       )}
 
-      {/* ELENCO TASK PRINCIPALI E SUBTASK */}
+      {/* RENDER CONDIZIONALE: VISTA TIMELINE GRAFICA vs GESTIONE TABELLARE */}
       {loadingTasks ? (
         <div className="text-xs text-gray-400 font-mono py-8 text-center">Caricamento cronoprogramma da Supabase...</div>
+      ) : viewMode === 'timeline' ? (
+        <TaskTimelineInfographic tasks={tasks} currencySymbol={currencySymbol} />
       ) : tasks.length === 0 ? (
         <div className="bg-gray-950/60 border border-dashed border-gray-800 p-8 rounded-2xl text-center text-xs text-gray-400">
           Nessun task presente per questo progetto. Clicca su <strong>+ Nuovo Task</strong> per iniziare.
