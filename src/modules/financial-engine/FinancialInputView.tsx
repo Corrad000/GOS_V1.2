@@ -158,7 +158,7 @@ export function FinancialInputView({
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 border-b border-gray-800 pb-3">
         <div>
           <h3 className="text-sm font-bold text-white">Modello di Calcolo Prodotti, Ricavi, Costi, Circolante & Finanziamenti</h3>
-          <p className="text-[11px] text-gray-400">Gestione centralizzata dei driver di input per il piano quinquennale (Allineato Uzbekistan Model).</p>
+          <p className="text-[11px] text-gray-400">Gestione centralizzata dei driver di input per il piano quinquennale.</p>
         </div>
 
         <div className="flex items-center gap-3">
@@ -191,7 +191,7 @@ export function FinancialInputView({
         <h4 className="text-xs font-bold text-amber-400 uppercase tracking-wider">Parametri Fiscali, Finanziari e Circolante (DSO / DIO / DPO)</h4>
         <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
           <div className="space-y-1">
-            <label className="text-[11px] text-gray-300 font-medium">Imposta Societaria (%) [Uzbekistan]</label>
+            <label className="text-[11px] text-gray-300 font-medium">Imposta Societaria (%)</label>
             <input
               type="number"
               value={corporateTaxRate}

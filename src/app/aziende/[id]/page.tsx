@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { createBrowserClient } from '@supabase/ssr';
+import { supabase } from '@/services/supabase/client';
 import AnagraficaForm from '../../components/AnagraficaForm';
 import { AnagraficaView } from '../../components/AnagraficaView';
 import { OfferBuilderView } from '@/modules/offer-builder/OfferBuilderView';
@@ -10,7 +10,9 @@ import { ModulePickerModal } from '@/modules/offer-builder/ModulePickerModal';
 import { OfferPreviewView } from '@/modules/offer-builder/OfferPreviewView';
 import { generateGlobalActivityCode } from '@/utils/codeGenerator';
 
-// Import della struttura pulita per i questionari aziendali
+// Import del componente documenti pulito e centralizzato
+import { DocumentsView } from '@/modules/project-management/DocumentsView';
+
 import { QuestionnaireBuilderView } from '@/modules/questionnaire-builder/QuestionnaireBuilderView';
 import { QuestionnaireComposerView } from '@/modules/questionnaire-builder/QuestionnaireComposerView';
 import { QuestionnairePreviewView } from '@/modules/questionnaire-builder/QuestionnairePreviewView';
@@ -45,12 +47,9 @@ export default function CompanyPage() {
   });
 
   const [isEditingAnagrafica, setIsEditingAnagrafica] = useState(false);
-
-  // Stati di navigazione interna per i Questionari (stile Offer Builder)
   const [activeQuestionario, setActiveQuestionario] = useState<any>(null);
   const [showQuestPreview, setShowQuestPreview] = useState(false);
 
-  // Stati Business Plan
   const [businessPlans, setBusinessPlans] = useState<any[]>([]);
   const [loadingBp, setLoadingBp] = useState(false);
   const [bpTitle, setBpTitle] = useState('');
@@ -59,7 +58,6 @@ export default function CompanyPage() {
   const [showCreateBpModal, setShowCreateBpModal] = useState(false);
   const [isSubmittingBp, setIsSubmittingBp] = useState(false);
 
-  // Stati Offerte Commerciali (Offer Builder)
   const [offersList, setOffersList] = useState<any[]>([]);
   const [loadingOffers, setLoadingOffers] = useState(false);
   const [activeOffer, setActiveOffer] = useState<any>(null);
@@ -68,7 +66,6 @@ export default function CompanyPage() {
   const [offerDescription, setOfferDescription] = useState('');
   const [isSubmittingOffer, setIsSubmittingOffer] = useState(false);
 
-  // Stati per la gestione del Picker moduli, della composizione offerta e dell'anteprima
   const [isModulePickerOpen, setIsModulePickerOpen] = useState(false);
   const [selectedCategoryForPicker, setSelectedCategoryForPicker] = useState<any>(null);
   const [selectedCompanyModules, setSelectedCompanyModules] = useState<any[]>([]);
@@ -78,14 +75,7 @@ export default function CompanyPage() {
     setSelectedCompanyModules(prev => prev.filter(m => m.id !== moduleId));
   };
 
-  const [companyFiles, setCompanyFiles] = useState<any[]>([]);
-  const [uploadingFile, setUploadingFile] = useState(false);
-
-  const supabase = createBrowserClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
-
+  // 1. Fetch Dettagli Azienda
   useEffect(() => {
     if (!companyId) return;
 
@@ -130,10 +120,13 @@ export default function CompanyPage() {
     }
 
     fetchCompanyDetails();
-  }, [companyId, supabase]);
+  }, [companyId]);
 
+  const companyCode = companyData.codice_azienda;
+
+  // 2. Fetch Progetti Business Plan
   useEffect(() => {
-    if (activeTab !== 'business' || !companyData.codice_azienda) return;
+    if (activeTab !== 'business' || !companyCode) return;
 
     async function loadProgetti() {
       setLoadingBp(true);
@@ -141,7 +134,7 @@ export default function CompanyPage() {
         const { data, error } = await supabase
           .from('gos_progetti')
           .select('*')
-          .eq('company_code', companyData.codice_azienda);
+          .eq('company_code', companyCode);
 
         if (error) throw error;
         setBusinessPlans(data || []);
@@ -153,10 +146,11 @@ export default function CompanyPage() {
     }
 
     loadProgetti();
-  }, [activeTab, companyData.codice_azienda, supabase]);
+  }, [activeTab, companyCode]);
 
+  // 3. Fetch Offerte Commerciali
   useEffect(() => {
-    if (activeTab !== 'offer-builder' || !companyData.codice_azienda) return;
+    if (activeTab !== 'offer-builder' || !companyCode) return;
 
     async function loadOfferte() {
       setLoadingOffers(true);
@@ -164,7 +158,7 @@ export default function CompanyPage() {
         const { data, error } = await supabase
           .from('gos_offerte')
           .select('*')
-          .eq('company_code', companyData.codice_azienda);
+          .eq('company_code', companyCode);
 
         if (error) throw error;
         setOffersList(data || []);
@@ -176,74 +170,7 @@ export default function CompanyPage() {
     }
 
     loadOfferte();
-  }, [activeTab, companyData.codice_azienda, supabase]);
-
-  useEffect(() => {
-    if (activeTab !== 'documenti' || !companyData.codice_azienda) return;
-
-    async function loadCompanyFiles() {
-      try {
-        const { data, error } = await supabase
-          .from('gos_company_files')
-          .select('*')
-          .eq('company_code', companyData.codice_azienda);
-
-        if (error) throw error;
-        setCompanyFiles(data || []);
-      } catch (err) {
-        setCompanyFiles([]);
-      }
-    }
-
-    loadCompanyFiles();
-  }, [activeTab, companyData.codice_azienda, supabase]);
-
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-
-    const file = files[0];
-    setUploadingFile(true);
-
-    try {
-      const filePath = `${companyData.codice_azienda}/${Date.now()}_${file.name}`;
-      const { error: storageError } = await supabase.storage
-        .from('company-documents')
-        .upload(filePath, file);
-
-      let publicUrl = '#';
-      if (!storageError) {
-        const { data: urlData } = supabase.storage.from('company-documents').getPublicUrl(filePath);
-        publicUrl = urlData.publicUrl;
-      }
-
-      const fileRecord = {
-        company_code: companyData.codice_azienda,
-        name: file.name,
-        size: `${(file.size / (1024 * 1024)).toFixed(1)} MB`,
-        type: file.name.split('.').pop()?.toUpperCase() || 'FILE',
-        url: publicUrl,
-        created_at: new Date().toISOString()
-      };
-
-      const { data } = await supabase
-        .from('gos_company_files')
-        .insert([fileRecord])
-        .select()
-        .single();
-
-      if (data) {
-        setCompanyFiles(prev => [data, ...prev]);
-      }
-
-      alert('File caricato con successo!');
-    } catch (err: any) {
-      alert('Errore durante il caricamento del file.');
-    } finally {
-      setUploadingFile(false);
-      e.target.value = '';
-    }
-  };
+  }, [activeTab, companyCode]);
 
   const handleCreateBusinessPlan = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -251,10 +178,10 @@ export default function CompanyPage() {
 
     setIsSubmittingBp(true);
     try {
-      const codiceProgetto = await generateGlobalActivityCode(companyData.codice_azienda, 'PRJ');
+      const codiceProgetto = await generateGlobalActivityCode(companyCode, 'PRJ');
 
       const newProgettoPayload = {
-        company_code: companyData.codice_azienda,
+        company_code: companyCode,
         codice_progetto: codiceProgetto,
         titolo: bpTitle,
         descrizione: bpDescription,
@@ -292,10 +219,10 @@ export default function CompanyPage() {
 
     setIsSubmittingOffer(true);
     try {
-      const codiceOfferta = await generateGlobalActivityCode(companyData.codice_azienda, 'OFF');
+      const codiceOfferta = await generateGlobalActivityCode(companyCode, 'OFF');
 
       const newOfferPayload = {
-        company_code: companyData.codice_azienda,
+        company_code: companyCode,
         codice_offerta: codiceOfferta,
         titolo: offerTitle,
         descrizione: offerDescription,
@@ -336,7 +263,7 @@ export default function CompanyPage() {
           <div className="space-y-2">
             <div className="flex items-center gap-3">
               <span className="px-3 py-1 bg-gray-900 border border-gray-800 text-[#FF5500] font-mono text-xs font-bold rounded-lg uppercase">
-                {companyData.codice_azienda}
+                {companyCode || companyId}
               </span>
               <span className="px-3 py-1 bg-emerald-950 border border-emerald-800 text-emerald-300 text-xs font-semibold rounded-lg uppercase">
                 {companyData.stato}
@@ -438,12 +365,11 @@ export default function CompanyPage() {
           </div>
         )}
 
-        {/* TAB QUESTIONARI & ASSESSMENT */}
         {activeTab === 'questionari' && (
           <div className="space-y-6">
             {!activeQuestionario ? (
               <QuestionnaireBuilderView
-                companyCode={companyData.codice_azienda}
+                companyCode={companyCode}
                 companyName={companyData.ragione_sociale}
                 onOpenComposer={(q) => {
                   setActiveQuestionario(q);
@@ -456,7 +382,7 @@ export default function CompanyPage() {
               />
             ) : !showQuestPreview ? (
               <QuestionnaireComposerView
-                companyCode={companyData.codice_azienda}
+                companyCode={companyCode}
                 companyName={companyData.ragione_sociale}
                 questionario={activeQuestionario}
                 onBack={() => setActiveQuestionario(null)}
@@ -464,7 +390,7 @@ export default function CompanyPage() {
               />
             ) : (
               <QuestionnairePreviewView
-                companyCode={companyData.codice_azienda}
+                companyCode={companyCode}
                 companyName={companyData.ragione_sociale}
                 companyEmail={companyData.email}
                 questionario={activeQuestionario}
@@ -540,7 +466,6 @@ export default function CompanyPage() {
           </div>
         )}
 
-        {/* OFFER BUILDER INTEGRATO */}
         {activeTab === 'offer-builder' && (
           <div className="space-y-6">
             {!activeOffer ? (
@@ -639,7 +564,7 @@ export default function CompanyPage() {
 
                     <OfferBuilderView 
                       companyId={companyId}
-                      companyCode={companyData.codice_azienda}
+                      companyCode={companyCode}
                       selectedCompanyModules={selectedCompanyModules}
                       onRemoveModule={handleRemoveCompanyModule}
                       onOpenModulePicker={(category: any) => {
@@ -675,62 +600,9 @@ export default function CompanyPage() {
           </div>
         )}
 
+        {/* TAB DOCUMENTI IMPLEMENTATA TRAMITE IL COMPONENTE DEDICATO (PASSANDO L'UUID AZIENDA) */}
         {activeTab === 'documenti' && (
-          <div className="bg-gray-900 border border-gray-800 p-6 rounded-2xl space-y-6">
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-gray-800 pb-4">
-              <div>
-                <h3 className="text-base font-bold text-white uppercase">Archivio Documenti & Immagini</h3>
-                <p className="text-xs text-gray-400 mt-0.5">Gestione allegati, visure, contratti e file di supporto per {companyData.ragione_sociale}.</p>
-              </div>
-              
-              <label className="px-4 py-2.5 bg-[#FF5500] hover:bg-orange-600 text-white text-xs font-bold rounded-xl shadow transition-all cursor-pointer uppercase tracking-wider inline-flex items-center gap-2">
-                {uploadingFile ? 'Caricamento...' : '+ Upload Documento'}
-                <input
-                  type="file"
-                  onChange={handleFileUpload}
-                  disabled={uploadingFile}
-                  className="hidden"
-                />
-              </label>
-            </div>
-
-            {companyFiles.length === 0 ? (
-              <div className="p-12 text-center border border-dashed border-gray-800 bg-gray-950 rounded-xl space-y-2">
-                <p className="text-sm text-gray-400">Nessun documento caricato per questa azienda.</p>
-                <p className="text-xs text-gray-500">Clicca su Upload Documento per caricare file o immagini.</p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {companyFiles.map((file) => (
-                  <div key={file.id} className="bg-gray-950 border border-gray-800 rounded-xl p-4 space-y-3 flex flex-col justify-between">
-                    <div className="space-y-1">
-                      <div className="flex justify-between items-start">
-                        <span className="px-2 py-0.5 bg-gray-900 text-[#FF5500] border border-gray-800 rounded text-[10px] font-mono font-bold uppercase">
-                          {file.type || 'FILE'}
-                        </span>
-                        <span className="text-[10px] font-mono text-gray-500">{file.size || '0.0 MB'}</span>
-                      </div>
-                      <h4 className="text-sm font-bold text-white truncate pt-1">{file.name}</h4>
-                    </div>
-
-                    <div className="pt-3 border-t border-gray-900 flex justify-between items-center text-xs">
-                      <span className="text-[10px] font-mono text-gray-500">
-                        {new Date(file.created_at || Date.now()).toLocaleDateString()}
-                      </span>
-                      <a
-                        href={file.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="px-3 py-1 bg-gray-900 hover:bg-gray-800 text-gray-200 font-bold rounded-lg border border-gray-800 transition-all text-xs"
-                      >
-                        Download
-                      </a>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+          <DocumentsView projectId={companyData.id || companyId} />
         )}
 
       </div>

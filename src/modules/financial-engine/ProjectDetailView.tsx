@@ -11,6 +11,7 @@ import { DebtPlanView, LoanItem } from '@/modules/financial-engine/DebtPlanView'
 import { TaskScheduleView } from '@/modules/project-management/TaskScheduleView';
 import { ProjectGovernanceView } from '@/modules/project-management/ProjectGovernanceView';
 import { businessReportService } from '@/services/pdf/businessReportService';
+import { DocumentsView } from '@/modules/project-management/DocumentsView';
 
 type EntityStatus = 'Bozza' | 'Attivo' | 'Chiuso';
 
@@ -45,7 +46,7 @@ export default function ProjectDetailView() {
   const params = useParams();
   const projectId = params?.id as string;
 
-  const [activeTab, setActiveTab] = useState<'input' | 'metrics' | 'pl' | 'cashflow' | 'debt' | 'tasks' | 'ruoli'>('input');
+  const [activeTab, setActiveTab] = useState<'input' | 'metrics' | 'pl' | 'cashflow' | 'debt' | 'tasks' | 'ruoli' | 'documents'>('input');
   const [isMounted, setIsMounted] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -62,7 +63,7 @@ export default function ProjectDetailView() {
     codice_progetto: 'PRJ-001'
   });
 
-  // Stati condivisi del modello finanziario perfettamente sincronizzati con FinancialInputView
+  // Stati condivisi del modello finanziario
   const [products, setProducts] = useState<ProductItem[]>([
     {
       name: 'Prodotto / Servizio Principale',
@@ -130,16 +131,13 @@ export default function ProjectDetailView() {
     loadProjectDetails();
   }, [projectId, supabase]);
 
-  // =====================================================================
-  // MOTORE DI CALCOLO FINANZIARIO AUTOMATICO (Allineato con amounts quinquennali)
-  // =====================================================================
+  // Motore di calcolo finanziario automatico
   const calculatedFinancials = useMemo(() => {
     const yearsCount = 5;
     const revenues = Array(yearsCount).fill(0);
     const cogs = Array(yearsCount).fill(0);
     const operationalCosts = Array(yearsCount).fill(0);
 
-    // 1. Calcolo Ricavi e COGS dai prodotti per ciascuno dei 5 anni
     (products || []).forEach((prod) => {
       for (let i = 0; i < yearsCount; i++) {
         const pces = Number(prod?.pieces?.[i] || 0);
@@ -151,34 +149,24 @@ export default function ProjectDetailView() {
       }
     });
 
-    // 2. Aggiunta Costi Generali di Produzione
     (generalProductionCosts || []).forEach((gc) => {
       for (let i = 0; i < yearsCount; i++) {
         cogs[i] += Number(gc?.amounts?.[i] || 0);
       }
     });
 
-    // 3. Somma Costi Operativi (OPEX) basati sugli array `amounts` quinquennali
     (opexItems || []).forEach((op) => {
       for (let i = 0; i < yearsCount; i++) {
         operationalCosts[i] += Number(op?.amounts?.[i] || 0);
       }
     });
 
-    // EBITDA = Ricavi - COGS - OPEX
     const ebitda = revenues.map((rev, i) => rev - (cogs[i] + operationalCosts[i]));
-
-    // EBIT = EBITDA - Ammortamenti
     const ebit = ebitda.map((eb) => eb - Number(depreciation || 0));
-
-    // EBT = EBIT + proventi finanziari - oneri finanziari
     const ebt = ebit.map((eb) => eb + Number(financialIncome || 0) - Number(financialExpenses || 0));
-
-    // Imposte e Utile Netto
     const taxes = ebt.map((eb) => (eb > 0 ? eb * (Number(corporateTaxRate || 24) / 100) : 0));
     const netIncome = ebt.map((eb, i) => eb - taxes[i]);
 
-    // Costruzione P&L Rows
     const pnlRows: PnLRowData[] = [
       { label: 'Valore della Produzione (Ricavi)', values: revenues },
       { label: 'Costi Operativi (COGS)', values: cogs, isNegative: true },
@@ -192,7 +180,6 @@ export default function ProjectDetailView() {
       { label: 'Utile Netto', values: netIncome, isSubtotal: true }
     ];
 
-    // Calcolo KPI / Key Metrics
     const ebitdaMargin = revenues.map((rev, i) => (rev > 0 ? (ebitda[i] / rev) * 100 : 0));
     const roi = revenues.map((rev, i) => (rev > 0 ? (netIncome[i] / rev) * 100 : 0));
 
@@ -201,7 +188,6 @@ export default function ProjectDetailView() {
       { label: 'ROI (Return on Investment)', values: roi, isPercentage: true }
     ];
 
-    // Cash Flow Operativo
     const cashFlowRows: CashFlowRowData[] = [
       { label: 'Flusso di Cassa Operativo', values: netIncome.map((ni) => ni + Number(depreciation || 0)), isSubtotal: true }
     ];
@@ -368,6 +354,12 @@ export default function ProjectDetailView() {
           >
             Ruoli
           </button>
+          <button
+            onClick={() => setActiveTab('documents')}
+            className={`pb-2 transition-all cursor-pointer ${activeTab === 'documents' ? 'text-white border-b-2 border-[#FF5500]' : 'text-gray-400 hover:text-gray-200'}`}
+          >
+            Documenti & File
+          </button>
         </div>
 
         {/* CONTENUTO TAB */}
@@ -423,6 +415,12 @@ export default function ProjectDetailView() {
         {activeTab === 'ruoli' && (
           <div className="bg-gray-900 border border-gray-800 p-6 rounded-2xl space-y-6">
             <ProjectGovernanceView projectId={projectId} />
+          </div>
+        )}
+
+        {activeTab === 'documents' && (
+          <div className="bg-gray-900 border border-gray-800 p-6 rounded-2xl space-y-6">
+            <DocumentsView projectId={projectId} />
           </div>
         )}
 
