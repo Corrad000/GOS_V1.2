@@ -41,6 +41,17 @@ interface FinancialInputProps {
   setCommissionItems: React.Dispatch<React.SetStateAction<CommissionItem[]>>;
   bonusItems: BonusItem[];
   setBonusItems: React.Dispatch<React.SetStateAction<BonusItem[]>>;
+  
+  // Nuovi props per Capitale e Circolante (DSO, DIO, DPO)
+  capitalInjection: [number, number, number, number, number];
+  setCapitalInjection: React.Dispatch<React.SetStateAction<[number, number, number, number, number]>>;
+  dso: number;
+  setDso: (val: number) => void;
+  dio: number;
+  setDio: (val: number) => void;
+  dpo: number;
+  setDpo: (val: number) => void;
+
   corporateTaxRate: number;
   setCorporateTaxRate: (val: number) => void;
   employeeTaxRate: number;
@@ -70,6 +81,14 @@ export function FinancialInputView({
   setCommissionItems,
   bonusItems = [],
   setBonusItems,
+  capitalInjection = [5000000, 0, 0, 0, 0],
+  setCapitalInjection,
+  dso = 5,
+  setDso,
+  dio = 3,
+  setDio,
+  dpo = 2,
+  setDpo,
   corporateTaxRate,
   setCorporateTaxRate,
   employeeTaxRate,
@@ -84,7 +103,7 @@ export function FinancialInputView({
   saving
 }: FinancialInputProps) {
 
-  const [currency, setCurrency] = useState<'EUR' | 'USD' | 'GBP' | 'CHF'>('EUR');
+  const [currency, setCurrency] = useState<'EUR' | 'USD' | 'GBP' | 'CHF'>('USD');
   const currencySymbol = currency === 'EUR' ? '€' : currency === 'USD' ? '$' : currency === 'GBP' ? '£' : 'CHF';
 
   const safeProducts = products || [];
@@ -138,8 +157,8 @@ export function FinancialInputView({
       {/* BARRA SUPERIORE */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 border-b border-gray-800 pb-3">
         <div>
-          <h3 className="text-sm font-bold text-white">Modello di Calcolo Prodotti, Ricavi, Costi e Provvigioni</h3>
-          <p className="text-[11px] text-gray-400">Gestione centralizzata dei driver di input per il piano quinquennale.</p>
+          <h3 className="text-sm font-bold text-white">Modello di Calcolo Prodotti, Ricavi, Costi, Circolante & Finanziamenti</h3>
+          <p className="text-[11px] text-gray-400">Gestione centralizzata dei driver di input per il piano quinquennale (Allineato Uzbekistan Model).</p>
         </div>
 
         <div className="flex items-center gap-3">
@@ -167,12 +186,12 @@ export function FinancialInputView({
         </div>
       </div>
 
-      {/* PARAMETRI FISCALI E SOCIETARI */}
+      {/* PARAMETRI FISCALI, SOCIETARI E CIRCOLANTE */}
       <div className="bg-gray-950 border border-gray-800 p-4 rounded-xl space-y-4">
-        <h4 className="text-xs font-bold text-amber-400 uppercase tracking-wider">Parametri Fiscali e Societari</h4>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <h4 className="text-xs font-bold text-amber-400 uppercase tracking-wider">Parametri Fiscali, Finanziari e Circolante (DSO / DIO / DPO)</h4>
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
           <div className="space-y-1">
-            <label className="text-[11px] text-gray-300 font-medium">Imposta Societaria / Aziendale (Corporate Tax %)</label>
+            <label className="text-[11px] text-gray-300 font-medium">Imposta Societaria (%) [Uzbekistan]</label>
             <input
               type="number"
               value={corporateTaxRate}
@@ -180,11 +199,11 @@ export function FinancialInputView({
               onChange={(e) => setCorporateTaxRate(Number(e.target.value))}
               className={`w-full bg-gray-900 border border-gray-800 rounded px-3 py-1.5 text-white text-xs font-mono ${noSpin}`}
             />
-            <p className="text-[10px] text-gray-500">Applicata sull'Utile Ante Tasse (EBT) quando positivo.</p>
+            <p className="text-[10px] text-gray-500">Imposta sul reddito (es. 15%).</p>
           </div>
 
           <div className="space-y-1">
-            <label className="text-[11px] text-gray-300 font-medium">Oneri & Contributi sul Personale (%)</label>
+            <label className="text-[11px] text-gray-300 font-medium">Oneri Personale (%)</label>
             <input
               type="number"
               value={employeeTaxRate}
@@ -192,8 +211,72 @@ export function FinancialInputView({
               onChange={(e) => setEmployeeTaxRate(Number(e.target.value))}
               className={`w-full bg-gray-900 border border-gray-800 rounded px-3 py-1.5 text-white text-xs font-mono ${noSpin}`}
             />
-            <p className="text-[10px] text-gray-500">Percentuale aggiunta automaticamente al costo del personale.</p>
+            <p className="text-[10px] text-gray-500">Contributi sul personale.</p>
           </div>
+
+          <div className="space-y-1">
+            <label className="text-[11px] text-gray-300 font-medium">DSO (Giorni Crediti Clienti)</label>
+            <input
+              type="number"
+              value={dso}
+              onFocus={handleFocus}
+              onChange={(e) => setDso(Number(e.target.value))}
+              className={`w-full bg-gray-900 border border-amber-500/40 rounded px-3 py-1.5 text-amber-400 text-xs font-mono font-bold ${noSpin}`}
+            />
+            <p className="text-[10px] text-gray-500">Standard: 5 giorni.</p>
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-[11px] text-gray-300 font-medium">DIO (Giorni Magazzino)</label>
+            <input
+              type="number"
+              value={dio}
+              onFocus={handleFocus}
+              onChange={(e) => setDio(Number(e.target.value))}
+              className={`w-full bg-gray-900 border border-amber-500/40 rounded px-3 py-1.5 text-amber-400 text-xs font-mono font-bold ${noSpin}`}
+            />
+            <p className="text-[10px] text-gray-500">Standard: 3 giorni.</p>
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-[11px] text-gray-300 font-medium">DPO (Giorni Debiti Fornitori)</label>
+            <input
+              type="number"
+              value={dpo}
+              onFocus={handleFocus}
+              onChange={(e) => setDpo(Number(e.target.value))}
+              className={`w-full bg-gray-900 border border-amber-500/40 rounded px-3 py-1.5 text-amber-400 text-xs font-mono font-bold ${noSpin}`}
+            />
+            <p className="text-[10px] text-gray-500">Standard: 2 giorni.</p>
+          </div>
+        </div>
+      </div>
+
+      {/* IMMISSIONE DI CAPITALE PLURIENNALE */}
+      <div className="bg-gray-950 border border-gray-800 p-4 rounded-xl space-y-3">
+        <div className="flex justify-between items-center">
+          <div>
+            <h4 className="text-xs font-bold text-amber-400 uppercase tracking-wider">Immissione di Capitale (Equity / Finanziamenti Soci)</h4>
+            <p className="text-[11px] text-gray-400">Inserisci l'apporto di capitale iniziale o pluriennale per ripianare la cassa (es. $5.000.000 all'Anno 1).</p>
+          </div>
+        </div>
+        <div className="grid grid-cols-5 gap-3">
+          {[0, 1, 2, 3, 4].map((y) => (
+            <div key={y} className="space-y-1 bg-gray-900 p-3 rounded-lg border border-gray-800 text-center">
+              <label className="text-[10px] text-gray-400 uppercase block font-semibold">Anno {y + 1}</label>
+              <input
+                type="number"
+                value={capitalInjection[y] || 0}
+                onFocus={handleFocus}
+                onChange={(e) => {
+                  const updated = [...capitalInjection] as [number, number, number, number, number];
+                  updated[y] = Number(e.target.value);
+                  setCapitalInjection(updated);
+                }}
+                className={`w-full bg-gray-950 border border-emerald-500/40 rounded px-2 py-1.5 text-center text-emerald-400 text-xs font-mono font-bold ${noSpin}`}
+              />
+            </div>
+          ))}
         </div>
       </div>
 

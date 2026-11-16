@@ -117,6 +117,12 @@ export default function ProjectDetailView() {
   const [commissionItems, setCommissionItems] = useState<CommissionItem[]>([]);
   const [bonusItems, setBonusItems] = useState<BonusItem[]>([]);
 
+  // Parametri di Circolante (DSO, DIO, DPO) e Immissione Capitale
+  const [capitalInjection, setCapitalInjection] = useState<[number, number, number, number, number]>([5000000, 0, 0, 0, 0]);
+  const [dso, setDso] = useState<number>(5);
+  const [dio, setDio] = useState<number>(3);
+  const [dpo, setDpo] = useState<number>(2);
+
   // Stato per il Manifesto Strategico & Advisory
   const [strategy, setStrategy] = useState<StrategyData>({
     themeAndScope: '',
@@ -126,7 +132,7 @@ export default function ProjectDetailView() {
     ourProposedStrategy: ''
   });
 
-  const [corporateTaxRate, setCorporateTaxRate] = useState<number>(24);
+  const [corporateTaxRate, setCorporateTaxRate] = useState<number>(15); // Imposta uzbeka al 15%
   const [employeeTaxRate, setEmployeeTaxRate] = useState<number>(30);
   
   const [depreciation, setDepreciation] = useState(0);
@@ -176,7 +182,7 @@ export default function ProjectDetailView() {
   }, [projectId, supabase]);
 
   // ==========================================
-  // MOTORE FINANZIARIO & INVESTIMENTO CONSIGLIATO
+  // MOTORE FINANZIARIO & MODELLO UZBEKISTAN
   // ==========================================
   const calculatedFinancials = useMemo(() => {
     const yearsCount = 5;
@@ -186,7 +192,6 @@ export default function ProjectDetailView() {
     const operationalCosts = Array(yearsCount).fill(0);
     const capexTotal = Array(yearsCount).fill(0);
     const assetSales = Array(yearsCount).fill(0);
-    const workingCapitalChange = Array(yearsCount).fill(0);
     const yearlyInterestExpenses = Array(yearsCount).fill(0);
     const yearlyPrincipalRepayments = Array(yearsCount).fill(0);
     const newDebtInflows = Array(yearsCount).fill(0);
@@ -242,6 +247,39 @@ export default function ProjectDetailView() {
       }
     });
 
+    // Calcolo Capitale Circolante Netto (CCN) basato su DSO, DIO, DPO
+    const accountsReceivable = revenues.map(rev => (rev * dso) / 365);
+    const inventory = cogs.map(cost => (cost * dio) / 365);
+    const accountsPayable = cogs.map(cost => (cost * dpo) / 365);
+    
+    const workingCapital = accountsReceivable.map((ar, i) => ar + inventory[i] - accountsPayable[i]);
+    const workingCapitalChange = Array(yearsCount).fill(0);
+    for (let i = 0; i < yearsCount; i++) {
+      if (i === 0) {
+        workingCapitalChange[i] = workingCapital[i]; // Variazione Anno 1 rispetto a zero
+      } else {
+        workingCapitalChange[i] = workingCapital[i] - workingCapital[i - 1];
+      }
+    }
+
+    // Matrice di Ammortamento Pluriennale basata su svalutazione asset storici (es. 20% Anno 1, 40% anni successivi)
+    const yearlyDepreciation = Array(yearsCount).fill(0);
+    const assetNetBookValues = Array(yearsCount).fill(0);
+    let cumulativeAssetCost = 0;
+    let accumulatedDepr = 0;
+
+    for (let i = 0; i < yearsCount; i++) {
+      cumulativeAssetCost += capexTotal[i];
+      // Anno 1: 20% sul costo o base ammortizzabile; Anni successivi: 40% sul residuo o base costante
+      const rate = i === 0 ? 0.20 : 0.40;
+      const baseAmortizable = cumulativeAssetCost * 0.90; // Es. 90% base ammortizzabile (salvage value 10%)
+      const depYear = Math.max(0, baseAmortizable * rate);
+      
+      yearlyDepreciation[i] = Number(depreciation || 0) > 0 ? Number(depreciation) : depYear;
+      accumulatedDepr += yearlyDepreciation[i];
+      assetNetBookValues[i] = Math.max(0, cumulativeAssetCost - accumulatedDepr);
+    }
+
     (loans || []).forEach((loan) => {
       const principal = Number(loan?.principal || 0);
       const interestRate = Number(loan?.interestRate || 0) / 100;
@@ -260,8 +298,6 @@ export default function ProjectDetailView() {
         totalDebtPerYear[yr] += runningDebt;
       }
     });
-
-    const yearlyDepreciation = capexTotal.map((cx) => Number(depreciation || 0) + (cx * 0.20));
 
     const ebitda = revenues.map((rev, i) => rev - (cogs[i] + staffCosts[i] + operationalCosts[i]));
     const ebit = ebitda.map((eb, i) => eb - yearlyDepreciation[i]);
@@ -284,11 +320,11 @@ export default function ProjectDetailView() {
       { label: 'Utile Netto', values: netIncome, isSubtotal: true }
     ];
 
-    const operatingCF = netIncome.map((ni, i) => ni + yearlyDepreciation[i] + workingCapitalChange[i]);
+    // Cash Flow Operativo include la variazione del circolante (negativa se il circolante assorbe cassa)
+    const operatingCF = netIncome.map((ni, i) => ni + yearlyDepreciation[i] - workingCapitalChange[i]);
     const totalInvestmentCF = capexTotal.map((cx, i) => assetSales[i] - cx);
     const netDebtVariation = newDebtInflows.map((inf, i) => inf - yearlyPrincipalRepayments[i]);
     const dividendsPaid = netIncome.map((ni) => (ni > 0 ? ni * 0.5 : 0));
-    const capitalInjection = Array(yearsCount).fill(0);
     const totalFinancingCF = netDebtVariation.map((nd, i) => nd + capitalInjection[i] - dividendsPaid[i]);
     const netCashVariation = operatingCF.map((ocf, i) => ocf + totalInvestmentCF[i] + totalFinancingCF[i]);
 
@@ -305,7 +341,7 @@ export default function ProjectDetailView() {
     const cashFlowRows: CashFlowRowData[] = [
       { label: 'Profitto Netto', values: netIncome },
       { label: 'Amm.ti e Sva.ni', values: yearlyDepreciation },
-      { label: 'Var.ne Capitale Circolante', values: workingCapitalChange },
+      { label: 'Var.ne Capitale Circolante', values: workingCapitalChange.map(w => -w) },
       { label: 'F.Cassa Operativo', values: operatingCF, isSubtotal: true },
       { label: 'CAPEX', values: capexTotal.map(c => -c), isNegative: true },
       { label: 'Vendita proprietà', values: assetSales },
@@ -324,13 +360,7 @@ export default function ProjectDetailView() {
     const firstYearOperatingOutflow = Math.abs(Math.min(0, operatingCF[0] || 0));
     const recommendedInvestment = totalCapexPlan + firstYearOperatingOutflow + ((operationalCosts[0] || 0) * 0.15);
 
-    const fixedAssets = Array(yearsCount).fill(0);
-    let runningNetAssets = 0;
-    for (let i = 0; i < yearsCount; i++) {
-      runningNetAssets += capexTotal[i] - yearlyDepreciation[i];
-      fixedAssets[i] = Math.max(0, runningNetAssets);
-    }
-
+    const fixedAssets = assetNetBookValues;
     const currentAssets = cashEnding.map(c => Math.max(0, c));
     const totalAssets = fixedAssets.map((fa, i) => fa + currentAssets[i]);
 
@@ -380,7 +410,7 @@ export default function ProjectDetailView() {
     ];
 
     return { pnlRows, kpiRows, cashFlowRows, balanceSheetRows, recommendedInvestment };
-  }, [products, generalProductionCosts, staffCostsItems, opexItems, commissionItems, bonusItems, capexItems, depreciation, financialIncome, financialExpenses, corporateTaxRate, employeeTaxRate, loans]);
+  }, [products, generalProductionCosts, staffCostsItems, opexItems, commissionItems, bonusItems, capexItems, depreciation, financialIncome, financialExpenses, corporateTaxRate, employeeTaxRate, loans, capitalInjection, dso, dio, dpo]);
 
   const handleStatusChange = async (newStatus: EntityStatus) => {
     setProjectData((prev: any) => ({ ...prev, stato: newStatus }));
@@ -669,6 +699,14 @@ export default function ProjectDetailView() {
             setCommissionItems={setCommissionItems}
             bonusItems={bonusItems}
             setBonusItems={setBonusItems}
+            capitalInjection={capitalInjection}
+            setCapitalInjection={setCapitalInjection}
+            dso={dso}
+            setDso={setDso}
+            dio={dio}
+            setDio={setDio}
+            dpo={dpo}
+            setDpo={setDpo}
             corporateTaxRate={corporateTaxRate}
             setCorporateTaxRate={setCorporateTaxRate}
             employeeTaxRate={employeeTaxRate}
