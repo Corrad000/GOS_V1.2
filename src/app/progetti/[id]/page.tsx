@@ -11,6 +11,7 @@ import { CashFlowView, CashFlowRowData } from '@/modules/financial-engine/CashFl
 import { DebtPlanView, LoanItem } from '@/modules/financial-engine/DebtPlanView';
 import { TaskScheduleView } from '@/modules/project-management/TaskScheduleView';
 import { ProjectGovernanceView } from '@/modules/project-management/ProjectGovernanceView';
+import { StrategyEntryView, StrategyData } from '@/modules/project-management/StrategyEntryView';
 import CruscottoProgetti from '@/app/components/cruscotto-progetti';
 import { businessReportService } from '@/services/pdf/businessReportService';
 
@@ -91,7 +92,7 @@ export default function ProjectDetailView() {
   const params = useParams();
   const projectId = params?.id as string;
 
-  const [activeTab, setActiveTab] = useState<'input' | 'metrics' | 'pl' | 'cashflow' | 'bs' | 'debt' | 'tasks' | 'ruoli' | 'cruscotto'>('input');
+  const [activeTab, setActiveTab] = useState<'strategy' | 'input' | 'metrics' | 'pl' | 'cashflow' | 'bs' | 'debt' | 'tasks' | 'ruoli' | 'cruscotto'>('strategy');
   const [isMounted, setIsMounted] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -115,6 +116,15 @@ export default function ProjectDetailView() {
   const [opexItems, setOpexItems] = useState<DynamicCostItem[]>([]);
   const [commissionItems, setCommissionItems] = useState<CommissionItem[]>([]);
   const [bonusItems, setBonusItems] = useState<BonusItem[]>([]);
+
+  // Stato per il Manifesto Strategico & Advisory
+  const [strategy, setStrategy] = useState<StrategyData>({
+    themeAndScope: '',
+    painPoints: '',
+    competitorsBenchmark: '',
+    currentProductAsIs: '',
+    ourProposedStrategy: ''
+  });
 
   const [corporateTaxRate, setCorporateTaxRate] = useState<number>(24);
   const [employeeTaxRate, setEmployeeTaxRate] = useState<number>(30);
@@ -143,7 +153,12 @@ export default function ProjectDetailView() {
           .single();
 
         if (error) throw error;
-        if (data) setProjectData(data);
+        if (data) {
+          setProjectData(data);
+          if (data.strategy_data) {
+            setStrategy(data.strategy_data);
+          }
+        }
       } catch (err) {
         console.warn('Fallback dati locali progetto:', err);
         setProjectData({
@@ -207,7 +222,6 @@ export default function ProjectDetailView() {
       }
     });
 
-    // Somma dei valori economici in euro (€) di provvigioni e bonus percentuali all'interno degli OPEX
     for (let yr = 0; yr < yearsCount; yr++) {
       let yrComm = 0;
       (commissionItems || []).forEach((comm) => {
@@ -306,12 +320,10 @@ export default function ProjectDetailView() {
       { label: 'Cassa alla fine', values: cashEnding, isSubtotal: true }
     ];
 
-    // --- CALCOLO INVESTIMENTO START-UP CONSIGLIATO ---
     const totalCapexPlan = capexTotal.reduce((a, b) => a + b, 0);
     const firstYearOperatingOutflow = Math.abs(Math.min(0, operatingCF[0] || 0));
     const recommendedInvestment = totalCapexPlan + firstYearOperatingOutflow + ((operationalCosts[0] || 0) * 0.15);
 
-    // --- STATO PATRIMONIALE PERFETTAMENTE QUADRATO ---
     const fixedAssets = Array(yearsCount).fill(0);
     let runningNetAssets = 0;
     for (let i = 0; i < yearsCount; i++) {
@@ -335,7 +347,6 @@ export default function ProjectDetailView() {
       { label: 'Totale Passivo & Patrimonio Netto', values: totalLiabilitiesAndEquity, isSubtotal: true }
     ];
 
-    // --- KPI AVANZATI ---
     const ebitdaMargin = revenues.map((rev, i) => (rev > 0 ? (ebitda[i] / rev) * 100 : 0));
     const hasActivity = revenues.some(r => r > 0) || capexTotal.some(c => c > 0);
     const waccConstant = Array(yearsCount).fill(hasActivity ? 8.5 : 0);
@@ -380,12 +391,22 @@ export default function ProjectDetailView() {
     }
   };
 
-  const handleSaveAll = () => {
+  const handleSaveAll = async () => {
     setSaving(true);
-    setTimeout(() => {
+    try {
+      const { error } = await supabase
+        .from('gos_progetti')
+        .update({ strategy_data: strategy })
+        .eq('id', projectId);
+
+      if (error) throw error;
+      alert('Tutti i dati del progetto, la strategia e i prospetti finanziari sono stati salvati con successo!');
+    } catch (err) {
+      console.error('Errore durante il salvataggio:', err);
+      alert('Errore durante il salvataggio dei dati su Supabase.');
+    } finally {
       setSaving(false);
-      alert('Tutti i dati del progetto e i prospetti finanziari sono stati salvati con successo!');
-    }, 600);
+    }
   };
 
   const calculateDebtScheduleForPDF = () => {
@@ -517,6 +538,12 @@ export default function ProjectDetailView() {
         {/* BARRA DEI TAB */}
         <div className="flex flex-wrap gap-6 border-b border-gray-800 pb-4 text-sm font-semibold">
           <button
+            onClick={() => setActiveTab('strategy')}
+            className={`pb-2 transition-all cursor-pointer ${activeTab === 'strategy' ? 'text-white border-b-2 border-[#FF5500]' : 'text-gray-400 hover:text-gray-200'}`}
+          >
+            Strategia & Advisory
+          </button>
+          <button
             onClick={() => setActiveTab('input')}
             className={`pb-2 transition-all cursor-pointer ${activeTab === 'input' ? 'text-white border-b-2 border-[#FF5500]' : 'text-gray-400 hover:text-gray-200'}`}
           >
@@ -617,6 +644,15 @@ export default function ProjectDetailView() {
         )}
 
         {/* CONTENUTO TAB */}
+        {activeTab === 'strategy' && (
+          <StrategyEntryView
+            strategy={strategy}
+            setStrategy={setStrategy}
+            onSave={handleSaveAll}
+            saving={saving}
+          />
+        )}
+
         {activeTab === 'input' && (
           <FinancialInputView
             products={products}
