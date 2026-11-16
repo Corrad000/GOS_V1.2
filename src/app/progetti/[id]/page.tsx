@@ -152,21 +152,48 @@ export default function ProjectDetailView() {
     async function loadProjectDetails() {
       setLoading(true);
       try {
-        const { data, error } = await supabase
+        // 1. Caricamento anagrafica progetto
+        const { data: projData, error: projError } = await supabase
           .from('gos_progetti')
           .select('*')
           .eq('id', projectId)
           .single();
 
-        if (error) throw error;
-        if (data) {
-          setProjectData(data);
-          if (data.strategy_data) {
-            setStrategy(data.strategy_data);
+        if (projError) throw projError;
+        if (projData) {
+          setProjectData(projData);
+          if (projData.strategy_data) {
+            setStrategy(projData.strategy_data);
           }
         }
+
+        // 2. Caricamento dati finanziari dedicati da gos_financial_data
+        const { data: finData, error: finError } = await supabase
+          .from('gos_financial_data')
+          .select('*')
+          .eq('project_id', projectId)
+          .single();
+
+        if (finData) {
+          if (finData.products) setProducts(finData.products);
+          if (finData.general_production_costs) setGeneralProductionCosts(finData.general_production_costs);
+          if (finData.staff_costs) setStaffCostsItems(finData.staff_costs);
+          if (finData.capex_items) setCapexItems(finData.capex_items);
+          if (finData.opex_items) setOpexItems(finData.opex_items);
+          if (finData.commission_items) setCommissionItems(finData.commission_items);
+          if (finData.bonus_items) setBonusItems(finData.bonus_items);
+          if (finData.capital_injection) setCapitalInjection(finData.capital_injection);
+          if (finData.dso !== undefined) setDso(finData.dso);
+          if (finData.dio !== undefined) setDio(finData.dio);
+          if (finData.dpo !== undefined) setDpo(finData.dpo);
+          if (finData.corporate_tax_rate !== undefined) setCorporateTaxRate(finData.corporate_tax_rate);
+          if (finData.employee_tax_rate !== undefined) setEmployeeTaxRate(finData.employee_tax_rate);
+          if (finData.depreciation !== undefined) setDepreciation(finData.depreciation);
+          if (finData.financial_income !== undefined) setFinancialIncome(finData.financial_income);
+          if (finData.financial_expenses !== undefined) setFinancialExpenses(finData.financial_expenses);
+        }
       } catch (err) {
-        console.warn('Fallback dati locali progetto:', err);
+        console.warn('Fallback o prima configurazione dati:', err);
         setProjectData({
           titolo: 'Piano Strategico Aziendale',
           descrizione: 'Analisi e simulazione economico-finanziaria quinquennale',
@@ -256,13 +283,13 @@ export default function ProjectDetailView() {
     const workingCapitalChange = Array(yearsCount).fill(0);
     for (let i = 0; i < yearsCount; i++) {
       if (i === 0) {
-        workingCapitalChange[i] = workingCapital[i]; // Variazione Anno 1 rispetto a zero
+        workingCapitalChange[i] = workingCapital[i];
       } else {
         workingCapitalChange[i] = workingCapital[i] - workingCapital[i - 1];
       }
     }
 
-    // Matrice di Ammortamento Pluriennale basata su svalutazione asset storici (es. 20% Anno 1, 40% anni successivi)
+    // Matrice di Ammortamento Pluriennale basata su svalutazione asset storici
     const yearlyDepreciation = Array(yearsCount).fill(0);
     const assetNetBookValues = Array(yearsCount).fill(0);
     let cumulativeAssetCost = 0;
@@ -270,9 +297,8 @@ export default function ProjectDetailView() {
 
     for (let i = 0; i < yearsCount; i++) {
       cumulativeAssetCost += capexTotal[i];
-      // Anno 1: 20% sul costo o base ammortizzabile; Anni successivi: 40% sul residuo o base costante
       const rate = i === 0 ? 0.20 : 0.40;
-      const baseAmortizable = cumulativeAssetCost * 0.90; // Es. 90% base ammortizzabile (salvage value 10%)
+      const baseAmortizable = cumulativeAssetCost * 0.90;
       const depYear = Math.max(0, baseAmortizable * rate);
       
       yearlyDepreciation[i] = Number(depreciation || 0) > 0 ? Number(depreciation) : depYear;
@@ -320,7 +346,6 @@ export default function ProjectDetailView() {
       { label: 'Utile Netto', values: netIncome, isSubtotal: true }
     ];
 
-    // Cash Flow Operativo include la variazione del circolante (negativa se il circolante assorbe cassa)
     const operatingCF = netIncome.map((ni, i) => ni + yearlyDepreciation[i] - workingCapitalChange[i]);
     const totalInvestmentCF = capexTotal.map((cx, i) => assetSales[i] - cx);
     const netDebtVariation = newDebtInflows.map((inf, i) => inf - yearlyPrincipalRepayments[i]);
@@ -421,15 +446,42 @@ export default function ProjectDetailView() {
     }
   };
 
+  // Salvataggio unificato su gos_progetti (strategia) e gos_financial_data (driver finanziari)
   const handleSaveAll = async () => {
     setSaving(true);
     try {
-      const { error } = await supabase
+      await supabase
         .from('gos_progetti')
         .update({ strategy_data: strategy })
         .eq('id', projectId);
 
-      if (error) throw error;
+      const financialPayload = {
+        project_id: projectId,
+        products,
+        general_production_costs: generalProductionCosts,
+        staff_costs: staffCostsItems,
+        capex_items: capexItems,
+        opex_items: opexItems,
+        commission_items: commissionItems,
+        bonus_items: bonusItems,
+        capital_injection: capitalInjection,
+        dso,
+        dio,
+        dpo,
+        corporate_tax_rate: corporateTaxRate,
+        employee_tax_rate: employeeTaxRate,
+        depreciation,
+        financial_income: financialIncome,
+        financial_expenses: financialExpenses,
+        updated_at: new Date().toISOString()
+      };
+
+      const { error: finError } = await supabase
+        .from('gos_financial_data')
+        .upsert(financialPayload, { onConflict: 'project_id' });
+
+      if (finError) throw finError;
+
       alert('Tutti i dati del progetto, la strategia e i prospetti finanziari sono stati salvati con successo!');
     } catch (err) {
       console.error('Errore durante il salvataggio:', err);
