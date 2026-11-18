@@ -27,25 +27,7 @@ export default function HomePage() {
 
     try {
       if (isSignUp) {
-        // REGISTRAZIONE NUOVO UTENTE CON REDIRECT DINAMICO AL DOMINIO ATTIVO
-        const redirectUrl = typeof window !== 'undefined' 
-          ? `${window.location.origin}/` 
-          : 'https://gos-v1-2-livid.vercel.app/';
-
-        const { error } = await supabase.auth.signUp({
-          email,
-          password,
-          options: {
-            data: { full_name: fullName },
-            emailRedirectTo: redirectUrl,
-          },
-        });
-
-        if (error) throw error;
-
-        setSuccessMsg('Registrazione completata! Controlla la tua email per confermare l’account ed effettua il login.');
-        setIsSignUp(false);
-      } else {
+        
         // LOGIN UTENTE ESISTENTE
         const { error } = await supabase.auth.signInWithPassword({
           email,
@@ -97,70 +79,7 @@ export default function HomePage() {
             {successMsg}
           </div>
         )}
-
-        {/* Form */}
-        <form onSubmit={handleSubmit} className="space-y-5">
-          {isSignUp && (
-            <div>
-              <label className="block text-gray-400 mb-1 font-bold uppercase text-[10px]">Nome Completo</label>
-              <input
-                type="text"
-                placeholder="Corrado Pinna"
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-                className="w-full bg-gray-950 border border-gray-700 px-3.5 py-3 rounded-xl text-white text-xs focus:outline-none focus:border-amber-500"
-                required={isSignUp}
-              />
-            </div>
-          )}
-
-          <div>
-            <label className="block text-gray-400 mb-1 font-bold uppercase text-[10px]">Email Istituzionale</label>
-            <input
-              type="email"
-              placeholder="corrado@glaring.world"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full bg-gray-950 border border-gray-700 px-3.5 py-3 rounded-xl text-white text-xs focus:outline-none focus:border-amber-500"
-              required
-            />
-          </div>
-
-          <div>
-            <label className="block text-gray-400 mb-1 font-bold uppercase text-[10px]">Password</label>
-            <input
-              type="password"
-              placeholder="••••••••"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full bg-gray-950 border border-gray-700 px-3.5 py-3 rounded-xl text-white text-xs focus:outline-none focus:border-amber-500"
-              required
-            />
-          </div>
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full py-3 bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold rounded-xl shadow transition-all cursor-pointer disabled:opacity-50 uppercase tracking-wider"
-          >
-            {loading ? 'Elaborazione...' : isSignUp ? 'Registrati al Network' : 'Accedi al Sistema'}
-          </button>
-        </form>
-
-        {/* Scambio tra Login e Registrazione */}
-        <div className="text-center pt-2">
-          <button
-            type="button"
-            onClick={() => {
-              setIsSignUp(!isSignUp);
-              setErrorMsg(null);
-              setSuccessMsg(null);
-            }}
-            className="text-xs text-amber-500 hover:text-amber-400 underline cursor-pointer font-medium"
-          >
-            {isSignUp ? 'Hai già un account? Effettua il login' : 'Sei un nuovo utente? Registrati qui'}
-          </button>
-        </div>
+        
 
         <div className="text-center pt-4 border-t border-gray-800 text-[10px] font-mono text-gray-500">
           Glaring LLP · Sicurezza e crittografia attiva

@@ -10,6 +10,7 @@ import { ProfitAndLossView, PnLRowData } from '@/modules/financial-engine/Profit
 import { CashFlowView, CashFlowRowData } from '@/modules/financial-engine/CashFlowView';
 import { DebtPlanView, LoanItem } from '@/modules/financial-engine/DebtPlanView';
 import { TaskScheduleView } from '@/modules/project-management/TaskScheduleView';
+import { KronosGanttView } from '@/modules/project-management/KronosGanttView';
 import { ProjectGovernanceView } from '@/modules/project-management/ProjectGovernanceView';
 import { StrategyEntryView, StrategyData } from '@/modules/project-management/StrategyEntryView';
 import CruscottoProgetti from '@/app/components/cruscotto-progetti';
@@ -93,7 +94,7 @@ export default function ProjectDetailView() {
   const params = useParams();
   const projectId = params?.id as string;
 
-  const [activeTab, setActiveTab] = useState<'strategy' | 'input' | 'metrics' | 'pl' | 'cashflow' | 'bs' | 'debt' | 'tasks' | 'ruoli' | 'cruscotto'>('strategy');
+  const [activeTab, setActiveTab] = useState<'strategy' | 'input' | 'metrics' | 'pl' | 'cashflow' | 'bs' | 'debt' | 'tasks' | 'kronos' | 'ruoli' | 'cruscotto'>('strategy');
   const [isMounted, setIsMounted] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -118,13 +119,11 @@ export default function ProjectDetailView() {
   const [commissionItems, setCommissionItems] = useState<CommissionItem[]>([]);
   const [bonusItems, setBonusItems] = useState<BonusItem[]>([]);
 
-  // Parametri di Circolante (DSO, DIO, DPO) e Immissione Capitale
   const [capitalInjection, setCapitalInjection] = useState<[number, number, number, number, number]>([5000000, 0, 0, 0, 0]);
   const [dso, setDso] = useState<number>(5);
   const [dio, setDio] = useState<number>(3);
   const [dpo, setDpo] = useState<number>(2);
 
-  // Stato per il Manifesto Strategico & Advisory
   const [strategy, setStrategy] = useState<StrategyData>({
     themeAndScope: '',
     painPoints: '',
@@ -133,7 +132,7 @@ export default function ProjectDetailView() {
     ourProposedStrategy: ''
   });
 
-  const [corporateTaxRate, setCorporateTaxRate] = useState<number>(15); // Imposta uzbeka al 15%
+  const [corporateTaxRate, setCorporateTaxRate] = useState<number>(15);
   const [employeeTaxRate, setEmployeeTaxRate] = useState<number>(30);
   
   const [depreciation, setDepreciation] = useState(0);
@@ -153,7 +152,6 @@ export default function ProjectDetailView() {
     async function loadProjectDetails() {
       setLoading(true);
       try {
-        // 1. Caricamento anagrafica progetto
         const { data: projData, error: projError } = await supabase
           .from('gos_progetti')
           .select('*')
@@ -168,8 +166,7 @@ export default function ProjectDetailView() {
           }
         }
 
-        // 2. Caricamento dati finanziari dedicati da gos_financial_data
-        const { data: finData, error: finError } = await supabase
+        const { data: finData } = await supabase
           .from('gos_financial_data')
           .select('*')
           .eq('project_id', projectId)
@@ -194,7 +191,7 @@ export default function ProjectDetailView() {
           if (finData.financial_expenses !== undefined) setFinancialExpenses(finData.financial_expenses);
         }
       } catch (err) {
-        console.warn('Fallback o prima configurazione dati:', err);
+        console.warn('Fallback dati:', err);
         setProjectData({
           titolo: 'Piano Strategico Aziendale',
           descrizione: 'Analisi e simulazione economico-finanziaria quinquennale',
@@ -209,9 +206,6 @@ export default function ProjectDetailView() {
     loadProjectDetails();
   }, [projectId, supabase]);
 
-  // ==========================================
-  // UTILIZZO DEL MODULO DI CALCOLO CENTRALIZZATO
-  // ==========================================
   const calculatedFinancials = useMemo(() => {
     return calculateFinancials({
       products,
@@ -257,11 +251,10 @@ export default function ProjectDetailView() {
     try {
       await supabase.from('gos_progetti').update({ stato: newStatus }).eq('id', projectId);
     } catch (err) {
-      console.error('Errore aggiornamento stato su database:', err);
+      console.error('Errore aggiornamento stato:', err);
     }
   };
 
-  // Salvataggio unificato su gos_progetti (strategia) e gos_financial_data (driver finanziari)
   const handleSaveAll = async () => {
     setSaving(true);
     try {
@@ -297,10 +290,10 @@ export default function ProjectDetailView() {
 
       if (finError) throw finError;
 
-      alert('Tutti i dati del progetto, la strategia e i prospetti finanziari sono stati salvati con successo!');
+      alert('Dati salvati con successo!');
     } catch (err) {
-      console.error('Errore durante il salvataggio:', err);
-      alert('Errore durante il salvataggio dei dati su Supabase.');
+      console.error('Errore salvataggio:', err);
+      alert('Errore durante il salvataggio.');
     } finally {
       setSaving(false);
     }
@@ -381,15 +374,15 @@ export default function ProjectDetailView() {
         'Corrado Pinna (Advisor)'
       );
     } catch (err) {
-      console.error('Errore generazione PDF:', err);
-      alert('Errore durante la generazione del report PDF.');
+      console.error('Errore PDF:', err);
+      alert('Errore generazione PDF.');
     } finally {
       setGeneratingPdf(false);
     }
   };
 
   if (!isMounted) {
-    return <main className="min-h-screen bg-gray-950 text-gray-100 p-10 font-mono text-xs">Caricamento area progetto...</main>;
+    return <main className="min-h-screen bg-gray-950 text-gray-100 p-10 font-mono text-xs">Caricamento...</main>;
   }
 
   return (
@@ -483,6 +476,12 @@ export default function ProjectDetailView() {
             Tasks
           </button>
           <button
+            onClick={() => setActiveTab('kronos')}
+            className={`pb-2 transition-all cursor-pointer ${activeTab === 'kronos' ? 'text-white border-b-2 border-[#FF5500]' : 'text-gray-400 hover:text-gray-200'}`}
+          >
+            Kronos
+          </button>
+          <button
             onClick={() => setActiveTab('ruoli')}
             className={`pb-2 transition-all cursor-pointer ${activeTab === 'ruoli' ? 'text-white border-b-2 border-[#FF5500]' : 'text-gray-400 hover:text-gray-200'}`}
           >
@@ -495,50 +494,6 @@ export default function ProjectDetailView() {
             Cruscotto
           </button>
         </div>
-
-        {/* CARD INVESTIMENTO CONSIGLIATO OTTIMIZZATA */}
-        {activeTab === 'input' && (
-          <div className="bg-gradient-to-r from-gray-900 via-gray-900 to-amber-950/30 border border-amber-500/40 p-6 rounded-2xl shadow-xl space-y-4 md:space-y-0 md:flex md:items-center md:justify-between gap-6">
-            
-            <div className="space-y-2 max-w-3xl">
-              <div className="flex items-center gap-2">
-                <span className="inline-flex items-center px-2.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-400 uppercase tracking-widest border border-amber-500/30">
-                  💡 Advisory Insight
-                </span>
-                <h3 className="text-base font-extrabold text-white uppercase tracking-tight">
-                  Investimento Start-up Consigliato
-                </h3>
-              </div>
-              <p className="text-xs text-gray-300 leading-relaxed">
-                Fabbisogno finanziario stimato per sostenere il piano, calcolato sommando:
-              </p>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px] text-gray-400 pt-1 font-mono">
-                <div className="bg-gray-950/60 border border-gray-800 p-2 rounded-lg">
-                  <span className="text-amber-400 font-bold block">1. CAPEX Totali</span>
-                  <span>Investimenti fissi pianificati</span>
-                </div>
-                <div className="bg-gray-950/60 border border-gray-800 p-2 rounded-lg">
-                  <span className="text-amber-400 font-bold block">2. Picco di Cassa</span>
-                  <span>Copertura deficit operativo (Anno 1)</span>
-                </div>
-                <div className="bg-gray-950/60 border border-gray-800 p-2 rounded-lg">
-                  <span className="text-amber-400 font-bold block">3. Buffer Circolante</span>
-                  <span>15% dei costi operativi di base</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex-shrink-0">
-              <div className="bg-gray-950 border border-amber-500/50 px-6 py-4 rounded-xl text-center md:text-right shadow-inner">
-                <span className="text-[10px] text-amber-400 uppercase tracking-widest font-mono block">Capitale Totale Stimato</span>
-                <span className="text-3xl font-mono font-extrabold text-amber-300 tracking-tight mt-0.5 block">
-                  € {Math.round(calculatedFinancials.recommendedInvestment || 0).toLocaleString('it-IT')}
-                </span>
-              </div>
-            </div>
-
-          </div>
-        )}
 
         {/* CONTENUTO TAB */}
         {activeTab === 'strategy' && (
@@ -617,6 +572,12 @@ export default function ProjectDetailView() {
         {activeTab === 'tasks' && (
           <div className="bg-gray-900 border border-gray-800 p-6 rounded-2xl space-y-6">
             <TaskScheduleView projectId={projectId} />
+          </div>
+        )}
+
+        {activeTab === 'kronos' && (
+          <div className="bg-gray-900 border border-gray-800 p-6 rounded-2xl space-y-6">
+            <KronosGanttView projectId={projectId} />
           </div>
         )}
 

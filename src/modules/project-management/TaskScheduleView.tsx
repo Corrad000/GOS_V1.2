@@ -24,7 +24,14 @@ export interface TaskItem {
   actualCost: number;
   priority: 'ALTA' | 'MEDIA' | 'BASSA';
   status: 'COMPLETATO' | 'IN_CORSO' | 'PIANIFICATO';
+  dipendenze?: string[]; // ID dei task predecessori
   subtasks: SubTaskItem[];
+}
+
+export interface ProjectRole {
+  id: string;
+  member_name: string;
+  role_title?: string;
 }
 
 interface TaskScheduleProps {
@@ -63,6 +70,7 @@ export function TaskScheduleView({ projectId }: TaskScheduleProps) {
   const [currency, setCurrency] = useState<string>('EUR');
   const [currencySymbol, setCurrencySymbol] = useState<string>('€');
   const [tasks, setTasks] = useState<TaskItem[]>([]);
+  const [projectRoles, setProjectRoles] = useState<ProjectRole[]>([]);
   const [loadingTasks, setLoadingTasks] = useState<boolean>(true);
   const [savingTask, setSavingTask] = useState<boolean>(false);
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
@@ -79,6 +87,7 @@ export function TaskScheduleView({ projectId }: TaskScheduleProps) {
   const [newBudget, setNewBudget] = useState<number>(1000);
   const [newActual, setNewActual] = useState<number>(0);
   const [newPriority, setNewPriority] = useState<'ALTA' | 'MEDIA' | 'BASSA'>('MEDIA');
+  const [newDependencies, setNewDependencies] = useState<string[]>([]);
 
   const [activeSubtaskInput, setActiveSubtaskInput] = useState<string | null>(null);
   const [subTitle, setSubTitle] = useState('');
@@ -90,6 +99,23 @@ export function TaskScheduleView({ projectId }: TaskScheduleProps) {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
+
+  // Recupero ruoli/partecipanti del progetto per la select dinamica
+  const fetchRoles = useCallback(async () => {
+    if (!projectId) return;
+    try {
+      const { data, error } = await supabase
+        .from('gos_project_roles')
+        .select('*')
+        .eq('progetto_id', projectId);
+
+      if (!error && data) {
+        setProjectRoles(data);
+      }
+    } catch (err) {
+      console.error('Errore recupero ruoli progetto:', err);
+    }
+  }, [projectId, supabase]);
 
   const fetchTasks = useCallback(async () => {
     if (!projectId) return;
@@ -120,6 +146,7 @@ export function TaskScheduleView({ projectId }: TaskScheduleProps) {
         actualCost: Number(p.costo_reale || 0),
         priority: mapDbPriorityToUi(p.priorita),
         status: mapDbStatusToUi(p.stato),
+        dipendenze: p.dipendenze || [],
         subtasks: childRows
           .filter((c: any) => c.parent_task_id === p.id)
           .map((c: any) => ({
@@ -142,8 +169,9 @@ export function TaskScheduleView({ projectId }: TaskScheduleProps) {
   }, [projectId, supabase]);
 
   useEffect(() => {
+    fetchRoles();
     fetchTasks();
-  }, [fetchTasks]);
+  }, [fetchRoles, fetchTasks]);
 
   const handleCurrencyChange = (val: string) => {
     setCurrency(val);
@@ -223,6 +251,7 @@ export function TaskScheduleView({ projectId }: TaskScheduleProps) {
         costo_reale: Number(newActual) || 0,
         priorita: mapUiPriorityToDb(newPriority),
         stato: 'da_fare',
+        dipendenze: newDependencies,
       };
 
       const { data, error } = await supabase
@@ -244,6 +273,7 @@ export function TaskScheduleView({ projectId }: TaskScheduleProps) {
         actualCost: Number(data.costo_reale || 0),
         priority: mapDbPriorityToUi(data.priorita),
         status: mapDbStatusToUi(data.stato),
+        dipendenze: data.dipendenze || [],
         subtasks: [],
       };
 
@@ -256,6 +286,7 @@ export function TaskScheduleView({ projectId }: TaskScheduleProps) {
       setNewBudget(1000);
       setNewActual(0);
       setNewPriority('MEDIA');
+      setNewDependencies([]);
       setIsAdding(false);
     } catch (err: any) {
       console.error('Errore salvataggio task:', err);
@@ -278,6 +309,7 @@ export function TaskScheduleView({ projectId }: TaskScheduleProps) {
     else if (field === 'actualCost') dbUpdate.costo_reale = Number(value) || 0;
     else if (field === 'priority') dbUpdate.priorita = mapUiPriorityToDb(value);
     else if (field === 'status') dbUpdate.stato = mapUiStatusToDb(value);
+    else if (field === 'dipendenze') dbUpdate.dipendenze = value;
 
     try {
       const { error } = await supabase.from('gos_tasks').update(dbUpdate).eq('id', id);
@@ -423,15 +455,14 @@ export function TaskScheduleView({ projectId }: TaskScheduleProps) {
 
   return (
     <div className="space-y-8">
-      {/* HEADER, SELETTORE VISTA (TIMELINE vs TABELLA), VALUTA E PULSANTE NUOVO TASK */}
+      {/* HEADER, SELETTORE VISTA, VALUTA E PULSANTE NUOVO TASK */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-gray-800 pb-4">
         <div>
           <h3 className="text-base font-bold text-white uppercase tracking-wider">Cronoprogramma & Task Operativi</h3>
-          <p className="text-xs text-gray-400">Pianificazione temporale, monitoraggio budget e subtask ({projectId}).</p>
+          <p className="text-xs text-gray-400">Pianificazione temporale, monitoraggio budget, dipendenze e subtask.</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          {/* TOGGLE VISTA */}
           <div className="flex items-center bg-gray-950 border border-gray-800 p-1 rounded-xl text-xs">
             <button
               onClick={() => setViewMode('timeline')}
@@ -540,17 +571,19 @@ export function TaskScheduleView({ projectId }: TaskScheduleProps) {
               />
             </div>
             <div>
-              <span className="text-[10px] text-amber-400 block mb-1 font-semibold">
-                ⚠️ Assegnare prima il ruolo ai partecipanti del progetto
-              </span>
-              <label className="text-gray-400 block mb-1">Assegnato a</label>
-              <input
-                type="text"
+              <label className="text-gray-400 block mb-1">Assegnato a (da Ruoli)</label>
+              <select
                 value={newAssignee}
                 onChange={(e) => setNewAssignee(e.target.value)}
-                placeholder="Es. Corrado Pinna"
-                className="w-full bg-gray-900 border border-gray-800 px-3 py-2 rounded-lg text-white"
-              />
+                className="w-full bg-gray-900 border border-gray-800 px-3 py-2 rounded-lg text-white cursor-pointer"
+              >
+                <option value="">Seleziona risorsa...</option>
+                {projectRoles.map((role) => (
+                  <option key={role.id} value={role.member_name}>
+                    {role.member_name} {role.role_title ? `(${role.role_title})` : ''}
+                  </option>
+                ))}
+              </select>
             </div>
             <div className="md:col-span-3">
               <label className="text-gray-400 block mb-1">Descrizione Task Principale</label>
@@ -610,6 +643,25 @@ export function TaskScheduleView({ projectId }: TaskScheduleProps) {
                 className="w-full bg-gray-900 border border-gray-800 px-3 py-2 rounded-lg text-white font-mono [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
               />
             </div>
+            <div>
+              <label className="text-gray-400 block mb-1">Dipende da (Task Precedente)</label>
+              <select
+                multiple
+                value={newDependencies}
+                onChange={(e) => {
+                  const options = Array.from(e.target.selectedOptions, (option) => option.value);
+                  setNewDependencies(options);
+                }}
+                className="w-full bg-gray-900 border border-gray-800 px-3 py-1.5 rounded-lg text-white h-20 cursor-pointer text-[11px]"
+              >
+                {tasks.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.title}
+                  </option>
+                ))}
+              </select>
+              <span className="text-[10px] text-gray-500 mt-0.5 block">Tieni premuto Ctrl/Cmd per selezioni multiple</span>
+            </div>
           </div>
           <div className="flex justify-end pt-2">
             <button
@@ -636,6 +688,7 @@ export function TaskScheduleView({ projectId }: TaskScheduleProps) {
         <div className="space-y-6">
           {tasks.map((task) => {
             const daysCount = calculateDays(task.startDate, task.endDate);
+            const taskVariance = task.estimatedBudget - task.actualCost;
             return (
               <div key={task.id} className="bg-gray-950 border border-gray-800 p-6 rounded-2xl space-y-5 relative">
                 {/* INTESTAZIONE TASK PRINCIPALE */}
@@ -661,6 +714,12 @@ export function TaskScheduleView({ projectId }: TaskScheduleProps) {
                       <span className="text-xs text-gray-400">
                         Durata stimata: <strong className="text-white font-mono">{daysCount} giorni</strong>
                       </span>
+
+                      {task.dipendenze && task.dipendenze.length > 0 && (
+                        <span className="text-[10px] bg-gray-900 border border-gray-800 px-2 py-0.5 rounded text-cyan-400">
+                          🔗 Dipendenze: {task.dipendenze.length} task
+                        </span>
+                      )}
                     </div>
 
                     <input
@@ -708,18 +767,23 @@ export function TaskScheduleView({ projectId }: TaskScheduleProps) {
                 {/* GRIGLIA DATI TASK PRINCIPALE */}
                 <div className="grid grid-cols-2 md:grid-cols-5 gap-4 pt-2 border-t border-gray-900 text-xs">
                   <div>
-                    <span className="text-[10px] text-amber-400 block mb-0.5 font-semibold">⚠️ Assegnare prima il ruolo</span>
-                    <span className="text-gray-400 block mb-1">Assegnato a</span>
-                    <input
-                      type="text"
+                    <label className="text-gray-400 block mb-1">Assegnato a</label>
+                    <select
                       value={task.assignee}
                       onChange={(e) => updateTaskField(task.id, 'assignee', e.target.value)}
-                      className="w-full bg-gray-900 border border-gray-800 px-3 py-1.5 rounded-lg text-white"
-                    />
+                      className="w-full bg-gray-900 border border-gray-800 px-3 py-1.5 rounded-lg text-white cursor-pointer"
+                    >
+                      <option value="">Seleziona risorsa...</option>
+                      {projectRoles.map((role) => (
+                        <option key={role.id} value={role.member_name}>
+                          {role.member_name} {role.role_title ? `(${role.role_title})` : ''}
+                        </option>
+                      ))}
+                    </select>
                   </div>
 
                   <div>
-                    <span className="text-gray-400 block mb-1">Data Inizio</span>
+                    <label className="text-gray-400 block mb-1">Data Inizio</label>
                     <input
                       type="date"
                       value={task.startDate}
@@ -729,7 +793,7 @@ export function TaskScheduleView({ projectId }: TaskScheduleProps) {
                   </div>
 
                   <div>
-                    <span className="text-gray-400 block mb-1">Data Fine</span>
+                    <label className="text-gray-400 block mb-1">Data Fine</label>
                     <input
                       type="date"
                       value={task.endDate}
@@ -739,7 +803,7 @@ export function TaskScheduleView({ projectId }: TaskScheduleProps) {
                   </div>
 
                   <div>
-                    <span className="text-gray-400 block mb-1">Budget Stimato ({currencySymbol})</span>
+                    <label className="text-gray-400 block mb-1">Budget ({currencySymbol})</label>
                     <input
                       type="number"
                       value={task.estimatedBudget}
@@ -749,13 +813,18 @@ export function TaskScheduleView({ projectId }: TaskScheduleProps) {
                   </div>
 
                   <div>
-                    <span className="text-gray-400 block mb-1">Spesa Reale ({currencySymbol})</span>
-                    <input
-                      type="number"
-                      value={task.actualCost}
-                      onChange={(e) => updateTaskField(task.id, 'actualCost', Number(e.target.value))}
-                      className="w-full bg-gray-900 border border-gray-800 px-3 py-1.5 rounded-lg text-cyan-400 font-mono font-bold [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                    />
+                    <label className="text-gray-400 block mb-1">Reale ({currencySymbol}) | Scost.</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        value={task.actualCost}
+                        onChange={(e) => updateTaskField(task.id, 'actualCost', Number(e.target.value))}
+                        className="w-full bg-gray-900 border border-gray-800 px-3 py-1.5 rounded-lg text-cyan-400 font-mono font-bold [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                      />
+                    </div>
+                    <span className={`text-[10px] font-mono mt-1 block ${taskVariance >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                      Δ: {currencySymbol} {taskVariance.toLocaleString('it-IT')}
+                    </span>
                   </div>
                 </div>
 
@@ -787,14 +856,19 @@ export function TaskScheduleView({ projectId }: TaskScheduleProps) {
                           />
                         </div>
                         <div>
-                          <label className="text-gray-400 block mb-1">Assegnato a</label>
-                          <input
-                            type="text"
+                          <label className="text-gray-400 block mb-1">Assegnato a (da Ruoli)</label>
+                          <select
                             value={subAssignee}
                             onChange={(e) => setSubAssignee(e.target.value)}
-                            placeholder="Assegnatario"
-                            className="w-full bg-gray-950 border border-gray-800 px-3 py-1.5 rounded-lg text-white"
-                          />
+                            className="w-full bg-gray-950 border border-gray-800 px-3 py-1.5 rounded-lg text-white cursor-pointer"
+                          >
+                            <option value="">Seleziona risorsa...</option>
+                            {projectRoles.map((role) => (
+                              <option key={role.id} value={role.member_name}>
+                                {role.member_name} {role.role_title ? `(${role.role_title})` : ''}
+                              </option>
+                            ))}
+                          </select>
                         </div>
                         <div>
                           <label className="text-gray-400 block mb-1">Data Inizio</label>
@@ -844,13 +918,18 @@ export function TaskScheduleView({ projectId }: TaskScheduleProps) {
                           </div>
 
                           <div className="flex flex-wrap items-center gap-2">
-                            <input
-                              type="text"
+                            <select
                               value={sub.assignee}
                               onChange={(e) => updateSubtaskField(task.id, sub.id, 'assignee', e.target.value)}
-                              className="w-28 bg-gray-950 border border-gray-800 px-2 py-1 rounded text-gray-300"
-                              placeholder="Assegnatario"
-                            />
+                              className="w-36 bg-gray-950 border border-gray-800 px-2 py-1 rounded text-gray-300 cursor-pointer"
+                            >
+                              <option value="">Assegnatario...</option>
+                              {projectRoles.map((role) => (
+                                <option key={role.id} value={role.member_name}>
+                                  {role.member_name}
+                                </option>
+                              ))}
+                            </select>
                             <input
                               type="date"
                               value={sub.startDate}

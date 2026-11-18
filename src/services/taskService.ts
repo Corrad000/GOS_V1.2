@@ -9,7 +9,7 @@ const supabase = createBrowserClient(
 export interface CleanTask {
   id: string;
   progetto_id: string;
-  codice_task?: string; // <-- Aggiunto il campo per il codice univoco
+  codice_task?: string;
   titolo: string;
   descrizione?: string;
   stato: 'da_fare' | 'in_corso' | 'completato';
@@ -19,6 +19,7 @@ export interface CleanTask {
   costo_budget?: number;
   costo_reale?: number;
   assegnato_a?: string;
+  dipendenze?: string[]; // <-- AGGIUNTO: Array di ID dei task predecessori
   created_at?: string;
 }
 
@@ -35,7 +36,6 @@ export const taskService = {
   },
 
   async createTask(task: Omit<CleanTask, 'id' | 'created_at'>, companyCode?: string): Promise<CleanTask> {
-    // Generazione automatica del codice univoco prima dell'inserimento
     const codiceTask = await generateGlobalActivityCode(companyCode, 'TSK');
 
     const { data, error } = await supabase
