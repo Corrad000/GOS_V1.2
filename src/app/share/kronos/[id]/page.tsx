@@ -36,7 +36,7 @@ const getIsoWeekNumber = (d: Date) => {
   const dayNum = target.getUTCDay() || 7;
   target.setUTCDate(target.getUTCDate() + 4 - dayNum);
   const yearStart = new Date(Date.UTC(target.getUTCFullYear(), 0, 1));
-  return Math.ceil((((target.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+  return Math.ceil(((target.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
 };
 
 export default function PublicClientKronosPage() {
@@ -49,10 +49,33 @@ export default function PublicClientKronosPage() {
   const [loading, setLoading] = useState<boolean>(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  const [hoveredNote, setHoveredNote] = useState<{
+    item: GanttItem;
+    wbs: string;
+    x: number;
+    y: number;
+  } | null>(null);
+
+  const [selectedNote, setSelectedNote] = useState<{
+    item: GanttItem;
+    wbs: string;
+    x: number;
+    y: number;
+  } | null>(null);
+
   const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
+
+  useEffect(() => {
+    if (!selectedNote) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setSelectedNote(null);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedNote]);
 
   const loadPublicGantt = useCallback(async () => {
     if (!projectId) return;
@@ -112,7 +135,6 @@ export default function PublicClientKronosPage() {
       : [];
   const todayIso = toIso(new Date());
 
-  // Raggruppamento Mese + Anno e Numero Settimana
   const monthSpans = useMemo(() => {
     if (dayList.length === 0) return [];
     const spans: { label: string; startCol: number; span: number }[] = [];
@@ -148,7 +170,10 @@ export default function PublicClientKronosPage() {
   }, [dayList]);
 
   return (
-    <main className="fixed inset-0 z-50 overflow-auto bg-[#15191f] text-[#e8ecf2] font-sans p-4 sm:p-8">
+    <main
+      onClick={() => setSelectedNote(null)}
+      className="min-h-screen bg-[#15191f] text-[#e8ecf2] font-sans p-4 sm:p-8"
+    >
       <div className="max-w-[1600px] mx-auto space-y-5 bg-[#15191f] border border-[#2a313c] p-6 rounded-3xl shadow-xl">
         {/* INTESTAZIONE PULITA */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-[#2a313c] pb-4">
@@ -210,7 +235,7 @@ export default function PublicClientKronosPage() {
           </span>
         </div>
 
-        {/* GRAFICO GANTT IN SOLA LETTURA CON MESE/ANNO, SETTIMANA E COLONNA SINISTRA BLOCCATA */}
+        {/* GRAFICO GANTT IN SOLA LETTURA */}
         {loading ? (
           <div className="text-xs text-[#9aa4b2] font-mono py-12 text-center">
             Caricamento cronoprogramma...
@@ -441,6 +466,27 @@ export default function PublicClientKronosPage() {
                   : item.type === 'opt'
                   ? '#5d6878'
                   : '#5b8be6';
+                const isSelected = selectedNote?.item.id === item.id;
+
+                const noteHandlers = {
+                  onMouseEnter: (ev: React.MouseEvent) => {
+                    setHoveredNote({ item, wbs: wbsCode, x: ev.clientX, y: ev.clientY });
+                  },
+                  onMouseMove: (ev: React.MouseEvent) => {
+                    setHoveredNote((prev) => (prev ? { ...prev, x: ev.clientX, y: ev.clientY } : null));
+                  },
+                  onMouseLeave: () => {
+                    setHoveredNote(null);
+                  },
+                  onClick: (ev: React.MouseEvent) => {
+                    ev.stopPropagation();
+                    setSelectedNote((prev) =>
+                      prev?.item.id === item.id
+                        ? null
+                        : { item, wbs: wbsCode, x: ev.clientX, y: ev.clientY }
+                    );
+                  },
+                };
 
                 return (
                   <React.Fragment key={item.id || idx}>
@@ -533,6 +579,7 @@ export default function PublicClientKronosPage() {
                     {/* BARRA O MILESTONE COLORATA */}
                     {isPoint ? (
                       <div
+                        {...noteHandlers}
                         style={{
                           gridColumn: startCol,
                           gridRow: rowIdx,
@@ -543,13 +590,15 @@ export default function PublicClientKronosPage() {
                           color: item.type === 'gate' ? '#38c27a' : '#e8ecf2',
                           zIndex: 10,
                           lineHeight: 1,
+                          cursor: 'pointer',
+                          transform: isSelected ? 'scale(1.25)' : undefined,
                         }}
-                        title={`${wbsCode} ${item.name} (${item.start_date})`}
                       >
                         ◆
                       </div>
                     ) : (
                       <div
+                        {...noteHandlers}
                         style={{
                           gridColumn: `${startCol} / ${endCol}`,
                           gridRow: rowIdx,
@@ -567,10 +616,12 @@ export default function PublicClientKronosPage() {
                           display: 'flex',
                           alignItems: 'center',
                           padding: '0 6px',
-                          boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+                          boxShadow: isSelected
+                            ? '0 0 0 2px #ffffff, 0 2px 6px rgba(0,0,0,0.45)'
+                            : '0 1px 3px rgba(0,0,0,0.3)',
                           overflow: 'hidden',
+                          cursor: 'pointer',
                         }}
-                        title={`${wbsCode} ${item.name}: ${item.start_date} → ${item.end_date}`}
                       >
                         <span
                           style={{
@@ -589,6 +640,84 @@ export default function PublicClientKronosPage() {
                   </React.Fragment>
                 );
               })}
+            </div>
+          </div>
+        )}
+
+        {/* TOOLTIP NOTA AL PASSAGGIO DEL MOUSE */}
+        {hoveredNote && !selectedNote && typeof window !== 'undefined' && (
+          <div
+            style={{
+              position: 'fixed',
+              top: Math.min(window.innerHeight - 170, hoveredNote.y + 14),
+              left: Math.min(window.innerWidth - 320, hoveredNote.x + 14),
+              zIndex: 60,
+              maxWidth: '300px',
+              pointerEvents: 'none',
+            }}
+            className="bg-[#1b212a] border border-[#2a313c] text-[#e8ecf2] p-3 rounded-xl shadow-2xl space-y-1.5 text-xs"
+          >
+            <div className="font-bold text-[#e8ecf2] flex items-center gap-1.5">
+              <span className="font-mono text-[#5b8be6]">{hoveredNote.wbs}</span>
+              <span className="truncate">{hoveredNote.item.name}</span>
+            </div>
+            <div className="text-[11px] text-[#9aa4b2]">
+              {hoveredNote.item.owner || 'Glaring'} · {formatShortDate(hoveredNote.item.start_date!)}
+              {hoveredNote.item.end_date !== hoveredNote.item.start_date
+                ? ` – ${formatShortDate(hoveredNote.item.end_date!)}`
+                : ''}
+            </div>
+            <div className="pt-1.5 border-t border-[#2a313c] text-[#e8ecf2] whitespace-pre-wrap break-words leading-relaxed">
+              {hoveredNote.item.note?.trim() ? (
+                hoveredNote.item.note
+              ) : (
+                <span className="italic text-[#9aa4b2]">Nessuna nota per questa attività.</span>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* SCHEDA NOTA AL CLIC SULLA BARRA */}
+        {selectedNote && typeof window !== 'undefined' && (
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              position: 'fixed',
+              top: Math.min(window.innerHeight - 230, Math.max(20, selectedNote.y + 12)),
+              left: Math.min(window.innerWidth - 360, Math.max(20, selectedNote.x - 140)),
+              zIndex: 70,
+              width: '340px',
+            }}
+            className="bg-[#1b212a] border border-[#5b8be6]/60 text-[#e8ecf2] p-4 rounded-2xl shadow-2xl space-y-2.5 text-xs"
+          >
+            <div className="flex items-start justify-between gap-2 border-b border-[#2a313c] pb-2">
+              <div>
+                <div className="font-bold text-[#e8ecf2] flex items-center gap-1.5">
+                  <span className="font-mono text-[#5b8be6]">{selectedNote.wbs}</span>
+                  <span>{selectedNote.item.name}</span>
+                </div>
+                <div className="text-[11px] text-[#9aa4b2] mt-0.5">
+                  {selectedNote.item.owner || 'Glaring'} · {formatShortDate(selectedNote.item.start_date!)}
+                  {selectedNote.item.end_date !== selectedNote.item.start_date
+                    ? ` – ${formatShortDate(selectedNote.item.end_date!)}`
+                    : ''}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedNote(null)}
+                className="text-[#9aa4b2] hover:text-[#e8ecf2] font-bold cursor-pointer px-1"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="text-[#e8ecf2] whitespace-pre-wrap break-words leading-relaxed bg-[#15191f] border border-[#2a313c] p-2.5 rounded-xl min-h-[56px]">
+              {selectedNote.item.note?.trim() ? (
+                selectedNote.item.note
+              ) : (
+                <span className="italic text-[#9aa4b2]">Nessuna nota inserita.</span>
+              )}
             </div>
           </div>
         )}

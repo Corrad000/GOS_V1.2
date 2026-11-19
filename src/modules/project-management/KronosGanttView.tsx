@@ -46,7 +46,7 @@ const getIsoWeekNumber = (d: Date) => {
   const dayNum = target.getUTCDay() || 7;
   target.setUTCDate(target.getUTCDate() + 4 - dayNum);
   const yearStart = new Date(Date.UTC(target.getUTCFullYear(), 0, 1));
-  return Math.ceil((((target.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+  return Math.ceil(((target.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
 };
 
 export function KronosGanttView({ projectId, forceClientMode = false }: KronosGanttProps) {
@@ -60,6 +60,20 @@ export function KronosGanttView({ projectId, forceClientMode = false }: KronosGa
   );
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [editingOwnerItem, setEditingOwnerItem] = useState<GanttItem | null>(null);
+
+  const [hoveredNote, setHoveredNote] = useState<{
+    item: GanttItem;
+    wbs: string;
+    x: number;
+    y: number;
+  } | null>(null);
+
+  const [selectedNote, setSelectedNote] = useState<{
+    item: GanttItem;
+    wbs: string;
+    x: number;
+    y: number;
+  } | null>(null);
 
   const isReadOnly = clientMode || forceClientMode;
 
@@ -78,6 +92,15 @@ export function KronosGanttView({ projectId, forceClientMode = false }: KronosGa
       setClientMode(true);
     }
   }, [forceClientMode]);
+
+  useEffect(() => {
+    if (!selectedNote) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setSelectedNote(null);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedNote]);
 
   const loadData = useCallback(async () => {
     if (!projectId) return;
@@ -252,7 +275,16 @@ export function KronosGanttView({ projectId, forceClientMode = false }: KronosGa
       updates.end_date = currentItem.start_date;
     }
 
-    setItems((prev) => prev.map((item) => (item.id === id ? { ...item, ...updates } : item)));
+    setItems((prev) => {
+      const next = prev.map((item) => (item.id === id ? { ...item, ...updates } : item));
+      const updated = next.find((item) => item.id === id);
+      if (updated) {
+        setSelectedNote((curr) => (curr?.item.id === id ? { ...curr, item: updated } : curr));
+        setHoveredNote((curr) => (curr?.item.id === id ? { ...curr, item: updated } : curr));
+      }
+      return next;
+    });
+
     setSavingId(id);
 
     try {
@@ -287,6 +319,8 @@ export function KronosGanttView({ projectId, forceClientMode = false }: KronosGa
   const handleDelete = async (id: string) => {
     const backup = [...items];
     setItems((prev) => prev.filter((i) => i.id !== id));
+    if (selectedNote?.item.id === id) setSelectedNote(null);
+    if (hoveredNote?.item.id === id) setHoveredNote(null);
     try {
       await ganttService.deleteGanttItem(id);
     } catch (err: any) {
@@ -296,10 +330,16 @@ export function KronosGanttView({ projectId, forceClientMode = false }: KronosGa
   };
 
   return (
-    <div className="space-y-6 text-[#e8ecf2] bg-[#15191f] p-6 rounded-3xl shadow-xl border border-[#2a313c]">
+    <div
+      onClick={() => setSelectedNote(null)}
+      className="space-y-6 text-[#e8ecf2] bg-[#15191f] p-6 rounded-3xl shadow-xl border border-[#2a313c]"
+    >
       {/* MODALE SELEZIONE RESPONSABILE */}
       {editingOwnerItem && !isReadOnly && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+        >
           <div className="bg-[#1b212a] border border-[#2a313c] text-[#e8ecf2] rounded-2xl w-full max-w-md p-6 shadow-2xl space-y-4">
             <div className="flex items-center justify-between border-b border-[#2a313c] pb-3">
               <h4 className="text-sm font-bold uppercase tracking-wider text-[#e8ecf2]">
@@ -514,7 +554,7 @@ export function KronosGanttView({ projectId, forceClientMode = false }: KronosGa
         </span>
       </div>
 
-      {/* MOTORE GRAFICO GANTT CON MESE/ANNO, SETTIMANA ISO E COLONNA SINISTRA BLOCCATA */}
+      {/* MOTORE GRAFICO GANTT */}
       {loading ? (
         <div className="text-xs text-[#9aa4b2] font-mono py-10 text-center">Caricamento Gantt Kronos...</div>
       ) : items.length === 0 ? (
@@ -726,6 +766,27 @@ export function KronosGanttView({ projectId, forceClientMode = false }: KronosGa
               const e = diff(minDate, t.end_date) + 3;
               const isPoint = t.type === 'ms' || t.type === 'gate';
               const barColor = t.crit ? '#f07a50' : t.type === 'opt' ? '#5d6878' : '#5b8be6';
+              const isSelected = selectedNote?.item.id === t.id;
+
+              const noteHandlers = {
+                onMouseEnter: (ev: React.MouseEvent) => {
+                  setHoveredNote({ item: t, wbs: wbsCode, x: ev.clientX, y: ev.clientY });
+                },
+                onMouseMove: (ev: React.MouseEvent) => {
+                  setHoveredNote((prev) => (prev ? { ...prev, x: ev.clientX, y: ev.clientY } : null));
+                },
+                onMouseLeave: () => {
+                  setHoveredNote(null);
+                },
+                onClick: (ev: React.MouseEvent) => {
+                  ev.stopPropagation();
+                  setSelectedNote((prev) =>
+                    prev?.item.id === t.id
+                      ? null
+                      : { item: t, wbs: wbsCode, x: ev.clientX, y: ev.clientY }
+                  );
+                },
+              };
 
               return (
                 <React.Fragment key={t.id || idx}>
@@ -803,6 +864,7 @@ export function KronosGanttView({ projectId, forceClientMode = false }: KronosGa
                   {/* BARRA O MILESTONE COLORATA */}
                   {isPoint ? (
                     <div
+                      {...noteHandlers}
                       style={{
                         gridColumn: s,
                         gridRow: rowIdx,
@@ -813,13 +875,15 @@ export function KronosGanttView({ projectId, forceClientMode = false }: KronosGa
                         color: t.type === 'gate' ? '#38c27a' : '#e8ecf2',
                         zIndex: 10,
                         lineHeight: 1,
+                        cursor: 'pointer',
+                        transform: isSelected ? 'scale(1.25)' : undefined,
                       }}
-                      title={`${wbsCode} ${t.name} (${t.start_date})`}
                     >
                       ◆
                     </div>
                   ) : (
                     <div
+                      {...noteHandlers}
                       style={{
                         gridColumn: `${s} / ${e}`,
                         gridRow: rowIdx,
@@ -837,10 +901,12 @@ export function KronosGanttView({ projectId, forceClientMode = false }: KronosGa
                         display: 'flex',
                         alignItems: 'center',
                         padding: '0 6px',
-                        boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+                        boxShadow: isSelected
+                          ? '0 0 0 2px #ffffff, 0 2px 6px rgba(0,0,0,0.45)'
+                          : '0 1px 3px rgba(0,0,0,0.3)',
                         overflow: 'hidden',
+                        cursor: 'pointer',
                       }}
-                      title={`${wbsCode} ${t.name}: ${t.start_date} → ${t.end_date}`}
                     >
                       <span
                         style={{
@@ -859,6 +925,84 @@ export function KronosGanttView({ projectId, forceClientMode = false }: KronosGa
                 </React.Fragment>
               );
             })}
+          </div>
+        </div>
+      )}
+
+      {/* TOOLTIP NOTA AL PASSAGGIO DEL MOUSE */}
+      {hoveredNote && !selectedNote && typeof window !== 'undefined' && (
+        <div
+          style={{
+            position: 'fixed',
+            top: Math.min(window.innerHeight - 170, hoveredNote.y + 14),
+            left: Math.min(window.innerWidth - 320, hoveredNote.x + 14),
+            zIndex: 60,
+            maxWidth: '300px',
+            pointerEvents: 'none',
+          }}
+          className="bg-[#1b212a] border border-[#2a313c] text-[#e8ecf2] p-3 rounded-xl shadow-2xl space-y-1.5 text-xs"
+        >
+          <div className="font-bold text-[#e8ecf2] flex items-center gap-1.5">
+            <span className="font-mono text-[#5b8be6]">{hoveredNote.wbs}</span>
+            <span className="truncate">{hoveredNote.item.name}</span>
+          </div>
+          <div className="text-[11px] text-[#9aa4b2]">
+            {hoveredNote.item.owner || 'Glaring'} · {short(hoveredNote.item.start_date!)}
+            {hoveredNote.item.end_date !== hoveredNote.item.start_date
+              ? ` – ${short(hoveredNote.item.end_date!)}`
+              : ''}
+          </div>
+          <div className="pt-1.5 border-t border-[#2a313c] text-[#e8ecf2] whitespace-pre-wrap break-words leading-relaxed">
+            {hoveredNote.item.note?.trim() ? (
+              hoveredNote.item.note
+            ) : (
+              <span className="italic text-[#9aa4b2]">Nessuna nota per questa attività.</span>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* SCHEDA NOTA AL CLIC SULLA BARRA */}
+      {selectedNote && typeof window !== 'undefined' && (
+        <div
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            position: 'fixed',
+            top: Math.min(window.innerHeight - 230, Math.max(20, selectedNote.y + 12)),
+            left: Math.min(window.innerWidth - 360, Math.max(20, selectedNote.x - 140)),
+            zIndex: 70,
+            width: '340px',
+          }}
+          className="bg-[#1b212a] border border-[#5b8be6]/60 text-[#e8ecf2] p-4 rounded-2xl shadow-2xl space-y-2.5 text-xs"
+        >
+          <div className="flex items-start justify-between gap-2 border-b border-[#2a313c] pb-2">
+            <div>
+              <div className="font-bold text-[#e8ecf2] flex items-center gap-1.5">
+                <span className="font-mono text-[#5b8be6]">{selectedNote.wbs}</span>
+                <span>{selectedNote.item.name}</span>
+              </div>
+              <div className="text-[11px] text-[#9aa4b2] mt-0.5">
+                {selectedNote.item.owner || 'Glaring'} · {short(selectedNote.item.start_date!)}
+                {selectedNote.item.end_date !== selectedNote.item.start_date
+                  ? ` – ${short(selectedNote.item.end_date!)}`
+                  : ''}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSelectedNote(null)}
+              className="text-[#9aa4b2] hover:text-[#e8ecf2] font-bold cursor-pointer px-1"
+            >
+              ✕
+            </button>
+          </div>
+
+          <div className="text-[#e8ecf2] whitespace-pre-wrap break-words leading-relaxed bg-[#15191f] border border-[#2a313c] p-2.5 rounded-xl min-h-[56px]">
+            {selectedNote.item.note?.trim() ? (
+              selectedNote.item.note
+            ) : (
+              <span className="italic text-[#9aa4b2]">Nessuna nota inserita.</span>
+            )}
           </div>
         </div>
       )}
