@@ -119,13 +119,8 @@ function NavigationHeader() {
           </div>
 
           <div className="flex items-center gap-2 border-l border-gray-800 pl-4">
-            <Link
-              href="/profile"
-              className="px-3 py-1.5 bg-[#1E293B] hover:bg-[#334155] border border-[#334155] text-gray-200 rounded-none text-xs font-bold transition-all cursor-pointer flex items-center"
-            >
-              Edit Profile
-            </Link>
             <button
+              type="button"
               onClick={handleLogout}
               className="px-3 py-1.5 bg-red-950/60 hover:bg-red-900/80 border border-red-800/60 text-red-300 rounded-none text-xs font-bold transition-all cursor-pointer"
             >

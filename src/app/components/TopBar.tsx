@@ -127,13 +127,7 @@ export default function TopBar() {
         </span>
 
         <button
-          onClick={() => router.push('/profile')}
-          className="px-3 py-1.5 bg-gray-900 hover:bg-gray-800 border border-gray-700 rounded-none text-white font-semibold transition-all cursor-pointer"
-        >
-          Edit Profile
-        </button>
-
-        <button
+          type="button"
           onClick={handleLogout}
           className="px-3 py-1.5 bg-red-950/40 hover:bg-red-900/60 border border-red-800 text-red-300 rounded-none font-semibold transition-all cursor-pointer"
         >
