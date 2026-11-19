@@ -6,6 +6,7 @@ import { ganttService, GanttItem } from '@/services/ganttService';
 
 interface KronosGanttProps {
   projectId: string;
+  forceClientMode?: boolean;
 }
 
 interface ProjectRole {
@@ -37,17 +38,30 @@ const diff = (a: string, b: string) =>
 const short = (s: string) =>
   parse(s).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit' });
 
-export function KronosGanttView({ projectId }: KronosGanttProps) {
+const getMonthYearLabel = (d: Date) =>
+  d.toLocaleDateString('it-IT', { month: 'long', year: 'numeric' }).toUpperCase();
+
+const getIsoWeekNumber = (d: Date) => {
+  const target = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const dayNum = target.getUTCDay() || 7;
+  target.setUTCDate(target.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(target.getUTCFullYear(), 0, 1));
+  return Math.ceil((((target.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+};
+
+export function KronosGanttView({ projectId, forceClientMode = false }: KronosGanttProps) {
   const [items, setItems] = useState<GanttItem[]>([]);
   const [projectRoles, setProjectRoles] = useState<ProjectRole[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [savingId, setSavingId] = useState<string | null>(null);
-  const [clientMode, setClientMode] = useState<boolean>(false);
+  const [clientMode, setClientMode] = useState<boolean>(forceClientMode);
   const [statusBadge, setStatusBadge] = useState<string>(
     'BOZZA – le date sono soggette a conferma ed approvazione Gate'
   );
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [editingOwnerItem, setEditingOwnerItem] = useState<GanttItem | null>(null);
+
+  const isReadOnly = clientMode || forceClientMode;
 
   const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -55,11 +69,15 @@ export function KronosGanttView({ projectId }: KronosGanttProps) {
   );
 
   useEffect(() => {
+    if (forceClientMode) {
+      setClientMode(true);
+      return;
+    }
     const params = new URLSearchParams(window.location.search);
     if (params.get('view') === 'cliente') {
       setClientMode(true);
     }
-  }, []);
+  }, [forceClientMode]);
 
   const loadData = useCallback(async () => {
     if (!projectId) return;
@@ -78,10 +96,10 @@ export function KronosGanttView({ projectId }: KronosGanttProps) {
       const formattedRoles = rolesData.map((r: any) => ({
         id: r.id || Math.random().toString(),
         nome: r.nome || r.member_name || r.name || 'Senza nome',
-        ruolo: r.ruolo || r.role_title || ''
+        ruolo: r.ruolo || r.role_title || '',
       }));
 
-      const uniqueRoles = Array.from(new Map(formattedRoles.map(r => [r.id, r])).values());
+      const uniqueRoles = Array.from(new Map(formattedRoles.map((r) => [r.id, r])).values());
       setProjectRoles(uniqueRoles as ProjectRole[]);
     } catch (err: any) {
       console.error('Errore caricamento Kronos:', err);
@@ -95,9 +113,6 @@ export function KronosGanttView({ projectId }: KronosGanttProps) {
     loadData();
   }, [loadData]);
 
-  // Numerazione gerarchica automatica:
-  // Intestazione gruppo = N (1, 2, 3...)
-  // Sub-attività / milestone / gate sotto quel gruppo = N.1, N.2, N.3...
   const wbsMap = useMemo(() => {
     const map: Record<string, string> = {};
     let groupNum = 0;
@@ -128,17 +143,52 @@ export function KronosGanttView({ projectId }: KronosGanttProps) {
 
   const datedItems = items.filter((i) => i.type !== 'grp' && i.start_date && i.end_date);
   const minDate = datedItems.length > 0 ? datedItems.map((i) => i.start_date!).sort()[0] : iso(new Date());
-  const maxDate = datedItems.length > 0 ? datedItems.map((i) => i.end_date!).sort().slice(-1)[0] : iso(addDays(new Date(), 30));
-  
+  const maxDate =
+    datedItems.length > 0 ? datedItems.map((i) => i.end_date!).sort().slice(-1)[0] : iso(addDays(new Date(), 30));
+
   const totalDays = Math.max(1, diff(minDate, maxDate) + 1);
   const dayList = Array.from({ length: totalDays }, (_, i) => iso(addDays(parse(minDate), i)));
 
   const todayIso = iso(new Date());
-  const operationalItems = items.filter(i => i.type !== 'grp');
+  const operationalItems = items.filter((i) => i.type !== 'grp');
   const totalTasksCount = operationalItems.length;
-  const criticalTasksCount = operationalItems.filter(i => i.crit).length;
-  const completedTasksCount = operationalItems.filter(i => i.end_date && i.end_date < todayIso).length;
+  const criticalTasksCount = operationalItems.filter((i) => i.crit).length;
+  const completedTasksCount = operationalItems.filter((i) => i.end_date && i.end_date < todayIso).length;
   const progressPercentage = totalTasksCount > 0 ? Math.round((completedTasksCount / totalTasksCount) * 100) : 0;
+
+  const monthSpans = useMemo(() => {
+    if (dayList.length === 0) return [];
+    const spans: { label: string; startCol: number; span: number }[] = [];
+    dayList.forEach((d, idx) => {
+      const label = getMonthYearLabel(parse(d));
+      const col = idx + 2;
+      const last = spans[spans.length - 1];
+      if (last && last.label === label) {
+        last.span += 1;
+      } else {
+        spans.push({ label, startCol: col, span: 1 });
+      }
+    });
+    return spans;
+  }, [dayList]);
+
+  const weekSpans = useMemo(() => {
+    if (dayList.length === 0) return [];
+    const spans: { label: string; startCol: number; span: number }[] = [];
+    dayList.forEach((d, idx) => {
+      const dt = parse(d);
+      const weekNo = getIsoWeekNumber(dt);
+      const label = `W${weekNo} · ${dt.getFullYear()}`;
+      const col = idx + 2;
+      const last = spans[spans.length - 1];
+      if (last && last.label === label) {
+        last.span += 1;
+      } else {
+        spans.push({ label, startCol: col, span: 1 });
+      }
+    });
+    return spans;
+  }, [dayList]);
 
   const getLastDate = () => {
     const ends = items.filter((i) => i.end_date).map((i) => i.end_date!).sort();
@@ -248,7 +298,7 @@ export function KronosGanttView({ projectId }: KronosGanttProps) {
   return (
     <div className="space-y-6 text-[#e8ecf2] bg-[#15191f] p-6 rounded-3xl shadow-xl border border-[#2a313c]">
       {/* MODALE SELEZIONE RESPONSABILE */}
-      {editingOwnerItem && (
+      {editingOwnerItem && !isReadOnly && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-[#1b212a] border border-[#2a313c] text-[#e8ecf2] rounded-2xl w-full max-w-md p-6 shadow-2xl space-y-4">
             <div className="flex items-center justify-between border-b border-[#2a313c] pb-3">
@@ -332,43 +382,45 @@ export function KronosGanttView({ projectId }: KronosGanttProps) {
       )}
 
       {/* HEADER E CONTROLLI */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-[#2a313c] pb-4">
-        <div>
-          <h3 className="text-base font-bold text-[#e8ecf2] uppercase tracking-wider">
-            Kronos · Gantt Operativo & Monitoraggio
-          </h3>
-          <p className="text-xs text-[#9aa4b2]">
-            Pianificazione master di fase, percorso critico, milestone e controllo avanzamento.
-          </p>
+      {!forceClientMode && (
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-[#2a313c] pb-4">
+          <div>
+            <h3 className="text-base font-bold text-[#e8ecf2] uppercase tracking-wider">
+              Kronos · Gantt Operativo & Monitoraggio
+            </h3>
+            <p className="text-xs text-[#9aa4b2]">
+              Pianificazione master di fase, percorso critico, milestone e controllo avanzamento.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              onClick={handleCopyClientLink}
+              className="px-3 py-1.5 bg-[#5b8be6] hover:bg-[#4a7ad8] text-white rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shadow"
+            >
+              Copia Link Cliente
+            </button>
+
+            <button
+              onClick={() => setClientMode(!clientMode)}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                clientMode
+                  ? 'bg-[#3a3218] text-[#f3d98b] border-[#5a4c22]'
+                  : 'bg-[#1b212a] text-[#e8ecf2] border-[#2a313c] hover:bg-[#222a36]'
+              }`}
+            >
+              {clientMode ? 'Vista Cliente Attiva (Sola Lettura)' : 'Modalità Master (Modifica)'}
+            </button>
+
+            <button
+              onClick={() => window.print()}
+              className="px-3 py-1.5 bg-[#1b212a] hover:bg-[#222a36] text-[#e8ecf2] border border-[#2a313c] rounded-xl text-xs font-bold transition-all cursor-pointer"
+            >
+              Stampa / PDF
+            </button>
+          </div>
         </div>
-
-        <div className="flex flex-wrap items-center gap-3">
-          <button
-            onClick={handleCopyClientLink}
-            className="px-3 py-1.5 bg-[#5b8be6] hover:bg-[#4a7ad8] text-white rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shadow"
-          >
-            Copia Link Cliente
-          </button>
-
-          <button
-            onClick={() => setClientMode(!clientMode)}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
-              clientMode
-                ? 'bg-[#3a3218] text-[#f3d98b] border-[#5a4c22]'
-                : 'bg-[#1b212a] text-[#e8ecf2] border-[#2a313c] hover:bg-[#222a36]'
-            }`}
-          >
-            {clientMode ? 'Vista Cliente Attiva (Sola Lettura)' : 'Modalità Master (Modifica)'}
-          </button>
-
-          <button
-            onClick={() => window.print()}
-            className="px-3 py-1.5 bg-[#1b212a] hover:bg-[#222a36] text-[#e8ecf2] border border-[#2a313c] rounded-xl text-xs font-bold transition-all cursor-pointer"
-          >
-            Stampa / PDF
-          </button>
-        </div>
-      </div>
+      )}
 
       {/* MONITORAGGIO PROGETTO (KPI & AVANZAMENTO) */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -382,7 +434,9 @@ export function KronosGanttView({ projectId }: KronosGanttProps) {
         </div>
         <div className="bg-[#1b212a] border border-[#2a313c] p-3.5 rounded-2xl shadow-sm flex flex-col justify-between">
           <span className="text-[11px] font-semibold text-[#38c27a] uppercase tracking-wider">Completate (Stima)</span>
-          <div className="text-lg font-bold text-[#38c27a] mt-1">{completedTasksCount} / {totalTasksCount}</div>
+          <div className="text-lg font-bold text-[#38c27a] mt-1">
+            {completedTasksCount} / {totalTasksCount}
+          </div>
         </div>
         <div className="bg-[#1b212a] border border-[#2a313c] p-3.5 rounded-2xl shadow-sm flex flex-col justify-between">
           <span className="text-[11px] font-semibold text-[#5b8be6] uppercase tracking-wider">Avanzamento Temporale</span>
@@ -404,7 +458,7 @@ export function KronosGanttView({ projectId }: KronosGanttProps) {
           </span>
         </div>
 
-        {!clientMode && (
+        {!isReadOnly && (
           <select
             value={statusBadge}
             onChange={async (e) => {
@@ -412,10 +466,7 @@ export function KronosGanttView({ projectId }: KronosGanttProps) {
               setStatusBadge(newStatus);
               setSavingId('status');
               try {
-                await supabase
-                  .from('gos_progetti')
-                  .update({ stato_piano: newStatus })
-                  .eq('id', projectId);
+                await supabase.from('gos_progetti').update({ stato_piano: newStatus }).eq('id', projectId);
               } catch (err) {
                 console.error('Errore aggiornamento stato piano:', err);
               } finally {
@@ -435,7 +486,9 @@ export function KronosGanttView({ projectId }: KronosGanttProps) {
       {errorMsg && (
         <div className="p-3 bg-red-950/70 border border-red-800 rounded-xl text-xs text-red-300 flex justify-between">
           <span>{errorMsg}</span>
-          <button onClick={() => setErrorMsg(null)} className="font-bold cursor-pointer">✕</button>
+          <button onClick={() => setErrorMsg(null)} className="font-bold cursor-pointer">
+            ✕
+          </button>
         </div>
       )}
 
@@ -461,7 +514,7 @@ export function KronosGanttView({ projectId }: KronosGanttProps) {
         </span>
       </div>
 
-      {/* MOTORE GRAFICO GANTT CON COLONNA SINISTRA STICKY */}
+      {/* MOTORE GRAFICO GANTT CON MESE/ANNO, SETTIMANA ISO E COLONNA SINISTRA BLOCCATA */}
       {loading ? (
         <div className="text-xs text-[#9aa4b2] font-mono py-10 text-center">Caricamento Gantt Kronos...</div>
       ) : items.length === 0 ? (
@@ -470,10 +523,123 @@ export function KronosGanttView({ projectId }: KronosGanttProps) {
         </div>
       ) : (
         <div className="overflow-x-auto border border-[#2a313c] rounded-2xl bg-[#15191f] shadow-md">
-          <div style={{ display: 'grid', gridTemplateColumns: `320px repeat(${totalDays}, minmax(28px, 1fr))`, minWidth: `${320 + totalDays * 28}px` }}>
-            
-            {/* INTESTAZIONE GIORNI (COLONNA 1 STICKY) */}
-            <div style={{ gridColumn: 1, gridRow: 1, background: '#1b212a', borderRight: '1px solid #2a313c', borderBottom: '1px solid #2a313c', padding: '10px 12px', fontWeight: 'bold', fontSize: '11px', color: '#e8ecf2', display: 'flex', alignItems: 'center', position: 'sticky', left: 0, zIndex: 30 }}>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: `320px repeat(${totalDays}, minmax(28px, 1fr))`,
+              minWidth: `${320 + totalDays * 28}px`,
+            }}
+          >
+            {/* RIGA 1: MESE + ANNO */}
+            <div
+              style={{
+                gridColumn: 1,
+                gridRow: 1,
+                background: '#171c24',
+                borderRight: '1px solid #2a313c',
+                borderBottom: '1px solid #2a313c',
+                padding: '6px 12px',
+                fontWeight: 700,
+                fontSize: '10px',
+                letterSpacing: '0.06em',
+                textTransform: 'uppercase',
+                color: '#9aa4b2',
+                display: 'flex',
+                alignItems: 'center',
+                position: 'sticky',
+                left: 0,
+                zIndex: 30,
+              }}
+            >
+              Periodo / Calendario
+            </div>
+            {monthSpans.map((m) => (
+              <div
+                key={`${m.label}-${m.startCol}`}
+                style={{
+                  gridColumn: `${m.startCol} / span ${m.span}`,
+                  gridRow: 1,
+                  background: '#171c24',
+                  borderLeft: '1px solid #2a313c',
+                  borderBottom: '1px solid #2a313c',
+                  padding: '6px 8px',
+                  fontSize: '11px',
+                  fontWeight: 700,
+                  letterSpacing: '0.05em',
+                  color: '#e8ecf2',
+                  textAlign: 'center',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                }}
+              >
+                {m.label}
+              </div>
+            ))}
+
+            {/* RIGA 2: NUMERO SETTIMANA + ANNO */}
+            <div
+              style={{
+                gridColumn: 1,
+                gridRow: 2,
+                background: '#191f28',
+                borderRight: '1px solid #2a313c',
+                borderBottom: '1px solid #2a313c',
+                padding: '5px 12px',
+                fontWeight: 600,
+                fontSize: '10px',
+                color: '#9aa4b2',
+                display: 'flex',
+                alignItems: 'center',
+                position: 'sticky',
+                left: 0,
+                zIndex: 30,
+              }}
+            >
+              Settimana ISO
+            </div>
+            {weekSpans.map((w) => (
+              <div
+                key={`${w.label}-${w.startCol}`}
+                style={{
+                  gridColumn: `${w.startCol} / span ${w.span}`,
+                  gridRow: 2,
+                  background: '#191f28',
+                  borderLeft: '1px solid #2a313c',
+                  borderBottom: '1px solid #2a313c',
+                  padding: '5px 4px',
+                  fontSize: '10px',
+                  fontWeight: 600,
+                  color: '#5b8be6',
+                  textAlign: 'center',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                }}
+              >
+                {w.label}
+              </div>
+            ))}
+
+            {/* RIGA 3: INTESTAZIONE GIORNI (COLONNA 1 BLOCCATA) */}
+            <div
+              style={{
+                gridColumn: 1,
+                gridRow: 3,
+                background: '#1b212a',
+                borderRight: '1px solid #2a313c',
+                borderBottom: '1px solid #2a313c',
+                padding: '8px 12px',
+                fontWeight: 'bold',
+                fontSize: '11px',
+                color: '#e8ecf2',
+                display: 'flex',
+                alignItems: 'center',
+                position: 'sticky',
+                left: 0,
+                zIndex: 30,
+              }}
+            >
               Attività / Responsabile / Date
             </div>
             {dayList.map((d, i) => {
@@ -485,7 +651,7 @@ export function KronosGanttView({ projectId }: KronosGanttProps) {
                   key={d}
                   style={{
                     gridColumn: i + 2,
-                    gridRow: 1,
+                    gridRow: 3,
                     background: isToday ? '#2563eb' : isWe ? '#1d232c' : '#1b212a',
                     color: isToday ? '#ffffff' : '#9aa4b2',
                     borderLeft: '1px solid #2a313c',
@@ -493,10 +659,12 @@ export function KronosGanttView({ projectId }: KronosGanttProps) {
                     textAlign: 'center',
                     padding: '6px 0',
                     fontSize: '11px',
-                    lineHeight: '1.2'
+                    lineHeight: '1.2',
                   }}
                 >
-                  <b style={{ display: 'block', fontSize: '11px', color: isToday ? '#ffffff' : '#e8ecf2' }}>{dt.getDate()}</b>
+                  <b style={{ display: 'block', fontSize: '11px', color: isToday ? '#ffffff' : '#e8ecf2' }}>
+                    {dt.getDate()}
+                  </b>
                   <span>{WEEK[dt.getDay()]}</span>
                 </div>
               );
@@ -504,19 +672,49 @@ export function KronosGanttView({ projectId }: KronosGanttProps) {
 
             {/* RIGHE ELEMENTI */}
             {items.map((t, idx) => {
-              const rowIdx = idx + 2;
+              const rowIdx = idx + 4;
               const isGroup = t.type === 'grp';
               const wbsCode = wbsMap[t.id || String(idx)] || '';
 
               if (isGroup) {
                 return (
                   <React.Fragment key={t.id || idx}>
-                    <div style={{ gridColumn: 1, gridRow: rowIdx, background: '#1b212a', borderRight: '1px solid #2a313c', borderTop: '1px solid #2a313c', padding: '6px 12px', fontSize: '12px', fontWeight: 'bold', color: '#9aa4b2', display: 'flex', alignItems: 'center', gap: '8px', textTransform: 'uppercase', position: 'sticky', left: 0, zIndex: 20 }}>
+                    <div
+                      style={{
+                        gridColumn: 1,
+                        gridRow: rowIdx,
+                        background: '#1b212a',
+                        borderRight: '1px solid #2a313c',
+                        borderTop: '1px solid #2a313c',
+                        padding: '6px 12px',
+                        fontSize: '12px',
+                        fontWeight: 'bold',
+                        color: '#9aa4b2',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        textTransform: 'uppercase',
+                        position: 'sticky',
+                        left: 0,
+                        zIndex: 20,
+                      }}
+                    >
                       <span style={{ color: '#5b8be6', fontFamily: 'monospace' }}>{wbsCode}</span>
-                      <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.name || '—'}</span>
+                      <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {t.name || '—'}
+                      </span>
                     </div>
                     {dayList.map((d, i) => (
-                      <div key={d} style={{ gridColumn: i + 2, gridRow: rowIdx, background: '#1b212a', borderLeft: '1px solid #2a313c', borderTop: '1px solid #2a313c' }} />
+                      <div
+                        key={d}
+                        style={{
+                          gridColumn: i + 2,
+                          gridRow: rowIdx,
+                          background: '#1b212a',
+                          borderLeft: '1px solid #2a313c',
+                          borderTop: '1px solid #2a313c',
+                        }}
+                      />
                     ))}
                   </React.Fragment>
                 );
@@ -527,14 +725,38 @@ export function KronosGanttView({ projectId }: KronosGanttProps) {
               const s = diff(minDate, t.start_date) + 2;
               const e = diff(minDate, t.end_date) + 3;
               const isPoint = t.type === 'ms' || t.type === 'gate';
-              
               const barColor = t.crit ? '#f07a50' : t.type === 'opt' ? '#5d6878' : '#5b8be6';
 
               return (
                 <React.Fragment key={t.id || idx}>
-                  {/* ETICHETTA LATO SINISTRO (STICKY) */}
-                  <div style={{ gridColumn: 1, gridRow: rowIdx, background: '#15191f', borderRight: '1px solid #2a313c', borderTop: '1px solid #2a313c', padding: '8px 12px', display: 'flex', flexDirection: 'column', justifyContent: 'center', minHeight: '38px', position: 'sticky', left: 0, zIndex: 20 }}>
-                    <span style={{ fontSize: '12px', color: '#e8ecf2', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {/* ETICHETTA LATO SINISTRO BLOCCATA */}
+                  <div
+                    style={{
+                      gridColumn: 1,
+                      gridRow: rowIdx,
+                      background: '#15191f',
+                      borderRight: '1px solid #2a313c',
+                      borderTop: '1px solid #2a313c',
+                      padding: '8px 12px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      justifyContent: 'center',
+                      minHeight: '38px',
+                      position: 'sticky',
+                      left: 0,
+                      zIndex: 20,
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontSize: '12px',
+                        color: '#e8ecf2',
+                        fontWeight: 500,
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                      }}
+                    >
                       <strong style={{ color: '#9aa4b2', fontWeight: 600, marginRight: '6px' }}>{wbsCode}</strong>
                       {t.name}
                     </span>
@@ -560,11 +782,19 @@ export function KronosGanttView({ projectId }: KronosGanttProps) {
                           borderLeft: '1px solid #2a313c',
                           borderTop: '1px solid #2a313c',
                           minHeight: '38px',
-                          position: 'relative'
+                          position: 'relative',
                         }}
                       >
                         {isHoliday && (
-                          <div style={{ width: '100%', height: '100%', opacity: 0.5, backgroundImage: 'repeating-linear-gradient(45deg, #1d232c, #1d232c 4px, #2a313c 4px, #2a313c 5px)' }} />
+                          <div
+                            style={{
+                              width: '100%',
+                              height: '100%',
+                              opacity: 0.5,
+                              backgroundImage:
+                                'repeating-linear-gradient(45deg, #1d232c, #1d232c 4px, #2a313c 4px, #2a313c 5px)',
+                            }}
+                          />
                         )}
                       </div>
                     );
@@ -582,7 +812,7 @@ export function KronosGanttView({ projectId }: KronosGanttProps) {
                         fontWeight: 'bold',
                         color: t.type === 'gate' ? '#38c27a' : '#e8ecf2',
                         zIndex: 10,
-                        lineHeight: 1
+                        lineHeight: 1,
                       }}
                       title={`${wbsCode} ${t.name} (${t.start_date})`}
                     >
@@ -598,18 +828,30 @@ export function KronosGanttView({ projectId }: KronosGanttProps) {
                         borderRadius: '4px',
                         background: barColor,
                         ...(t.type === 'opt'
-                          ? { backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(255,255,255,0.25) 4px, rgba(255,255,255,0.25) 8px)' }
+                          ? {
+                              backgroundImage:
+                                'repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(255,255,255,0.25) 4px, rgba(255,255,255,0.25) 8px)',
+                            }
                           : {}),
                         zIndex: 10,
                         display: 'flex',
                         alignItems: 'center',
                         padding: '0 6px',
                         boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
-                        overflow: 'hidden'
+                        overflow: 'hidden',
                       }}
                       title={`${wbsCode} ${t.name}: ${t.start_date} → ${t.end_date}`}
                     >
-                      <span style={{ fontSize: '10px', color: '#ffffff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontWeight: 300 }}>
+                      <span
+                        style={{
+                          fontSize: '10px',
+                          color: '#ffffff',
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          fontWeight: 300,
+                        }}
+                      >
                         {wbsCode} · {t.name}
                       </span>
                     </div>
@@ -622,7 +864,7 @@ export function KronosGanttView({ projectId }: KronosGanttProps) {
       )}
 
       {/* EDITOR TABELLARE */}
-      {!clientMode && (
+      {!isReadOnly && (
         <div className="space-y-4 pt-2">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-2">
@@ -690,9 +932,7 @@ export function KronosGanttView({ projectId }: KronosGanttProps) {
                           isGroup ? 'bg-[#15191f] font-semibold text-[#9aa4b2]' : 'hover:bg-[#15191f]/50 text-[#e8ecf2]'
                         }`}
                       >
-                        <td className="p-2 font-mono font-bold text-[#5b8be6] whitespace-nowrap">
-                          {wbsCode}
-                        </td>
+                        <td className="p-2 font-mono font-bold text-[#5b8be6] whitespace-nowrap">{wbsCode}</td>
 
                         <td className="p-2">
                           <select

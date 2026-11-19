@@ -6,8 +6,7 @@ export default function PublicShareLayout({
   children: React.ReactNode;
 }) {
   return (
-    <div className="min-h-screen bg-gray-950 text-gray-100 font-sans selection:bg-cyan-500 selection:text-white">
-      {/* Nessun menu, nessun Edit Profile, nessun Log-out: solo il contenuto pulito per il cliente */}
+    <div className="min-h-screen bg-[#15191f] text-[#e8ecf2] font-sans antialiased">
       {children}
     </div>
   );
