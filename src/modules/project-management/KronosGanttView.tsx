@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { createBrowserClient } from '@supabase/ssr';
 import { ganttService, GanttItem } from '@/services/ganttService';
 
@@ -94,6 +94,30 @@ export function KronosGanttView({ projectId }: KronosGanttProps) {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  // Numerazione gerarchica automatica:
+  // Intestazione gruppo = N (1, 2, 3...)
+  // Sub-attività / milestone / gate sotto quel gruppo = N.1, N.2, N.3...
+  const wbsMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    let groupNum = 0;
+    let subNum = 0;
+
+    items.forEach((item, idx) => {
+      const key = item.id || String(idx);
+      if (item.type === 'grp') {
+        groupNum += 1;
+        subNum = 0;
+        map[key] = String(groupNum);
+      } else {
+        subNum += 1;
+        const prefix = groupNum > 0 ? String(groupNum) : '0';
+        map[key] = `${prefix}.${subNum}`;
+      }
+    });
+
+    return map;
+  }, [items]);
 
   const handleCopyClientLink = () => {
     const origin = window.location.origin;
@@ -437,7 +461,7 @@ export function KronosGanttView({ projectId }: KronosGanttProps) {
         </span>
       </div>
 
-      {/* MOTORE GRAFICO GANTT CON COLONNA SINISTRA STICKY (BLOCCATA) */}
+      {/* MOTORE GRAFICO GANTT CON COLONNA SINISTRA STICKY */}
       {loading ? (
         <div className="text-xs text-[#9aa4b2] font-mono py-10 text-center">Caricamento Gantt Kronos...</div>
       ) : items.length === 0 ? (
@@ -482,12 +506,14 @@ export function KronosGanttView({ projectId }: KronosGanttProps) {
             {items.map((t, idx) => {
               const rowIdx = idx + 2;
               const isGroup = t.type === 'grp';
+              const wbsCode = wbsMap[t.id || String(idx)] || '';
 
               if (isGroup) {
                 return (
                   <React.Fragment key={t.id || idx}>
-                    <div style={{ gridColumn: 1, gridRow: rowIdx, background: '#1b212a', borderRight: '1px solid #2a313c', borderTop: '1px solid #2a313c', padding: '6px 12px', fontSize: '12px', fontWeight: 'bold', color: '#9aa4b2', display: 'flex', alignItems: 'center', textTransform: 'uppercase', position: 'sticky', left: 0, zIndex: 20 }}>
-                      {t.name || '—'}
+                    <div style={{ gridColumn: 1, gridRow: rowIdx, background: '#1b212a', borderRight: '1px solid #2a313c', borderTop: '1px solid #2a313c', padding: '6px 12px', fontSize: '12px', fontWeight: 'bold', color: '#9aa4b2', display: 'flex', alignItems: 'center', gap: '8px', textTransform: 'uppercase', position: 'sticky', left: 0, zIndex: 20 }}>
+                      <span style={{ color: '#5b8be6', fontFamily: 'monospace' }}>{wbsCode}</span>
+                      <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.name || '—'}</span>
                     </div>
                     {dayList.map((d, i) => (
                       <div key={d} style={{ gridColumn: i + 2, gridRow: rowIdx, background: '#1b212a', borderLeft: '1px solid #2a313c', borderTop: '1px solid #2a313c' }} />
@@ -508,7 +534,10 @@ export function KronosGanttView({ projectId }: KronosGanttProps) {
                 <React.Fragment key={t.id || idx}>
                   {/* ETICHETTA LATO SINISTRO (STICKY) */}
                   <div style={{ gridColumn: 1, gridRow: rowIdx, background: '#15191f', borderRight: '1px solid #2a313c', borderTop: '1px solid #2a313c', padding: '8px 12px', display: 'flex', flexDirection: 'column', justifyContent: 'center', minHeight: '38px', position: 'sticky', left: 0, zIndex: 20 }}>
-                    <span style={{ fontSize: '12px', color: '#e8ecf2', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.name}</span>
+                    <span style={{ fontSize: '12px', color: '#e8ecf2', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      <strong style={{ color: '#9aa4b2', fontWeight: 600, marginRight: '6px' }}>{wbsCode}</strong>
+                      {t.name}
+                    </span>
                     <small style={{ fontSize: '11px', color: '#9aa4b2', marginTop: '2px' }}>
                       {t.owner || 'Glaring'} · {short(t.start_date)} {t.end_date !== t.start_date ? `– ${short(t.end_date)}` : ''}
                     </small>
@@ -555,7 +584,7 @@ export function KronosGanttView({ projectId }: KronosGanttProps) {
                         zIndex: 10,
                         lineHeight: 1
                       }}
-                      title={`${t.name} (${t.start_date})`}
+                      title={`${wbsCode} ${t.name} (${t.start_date})`}
                     >
                       ◆
                     </div>
@@ -578,10 +607,10 @@ export function KronosGanttView({ projectId }: KronosGanttProps) {
                         boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
                         overflow: 'hidden'
                       }}
-                      title={`${t.name}: ${t.start_date} → ${t.end_date}`}
+                      title={`${wbsCode} ${t.name}: ${t.start_date} → ${t.end_date}`}
                     >
                       <span style={{ fontSize: '10px', color: '#ffffff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontWeight: 300 }}>
-                        {t.name}
+                        {wbsCode} · {t.name}
                       </span>
                     </div>
                   )}
@@ -637,6 +666,7 @@ export function KronosGanttView({ projectId }: KronosGanttProps) {
               <table className="w-full text-left border-collapse text-xs">
                 <thead>
                   <tr className="border-b border-[#2a313c] text-[11px] text-[#9aa4b2] bg-[#15191f]">
+                    <th className="p-3">Codice</th>
                     <th className="p-3">Tipo</th>
                     <th className="p-3 min-w-[200px]">Nome Voce</th>
                     <th className="p-3 min-w-[240px]">Responsabile</th>
@@ -651,6 +681,7 @@ export function KronosGanttView({ projectId }: KronosGanttProps) {
                   {items.map((item, idx) => {
                     const isGroup = item.type === 'grp';
                     const isPoint = item.type === 'ms' || item.type === 'gate';
+                    const wbsCode = wbsMap[item.id || String(idx)] || '';
 
                     return (
                       <tr
@@ -659,6 +690,10 @@ export function KronosGanttView({ projectId }: KronosGanttProps) {
                           isGroup ? 'bg-[#15191f] font-semibold text-[#9aa4b2]' : 'hover:bg-[#15191f]/50 text-[#e8ecf2]'
                         }`}
                       >
+                        <td className="p-2 font-mono font-bold text-[#5b8be6] whitespace-nowrap">
+                          {wbsCode}
+                        </td>
+
                         <td className="p-2">
                           <select
                             value={item.crit ? 'crit' : item.type}
