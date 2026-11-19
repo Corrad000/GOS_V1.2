@@ -6,7 +6,6 @@ import { useState, useEffect, Suspense } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
 
-// Componente interno per gestire la barra di navigazione con usePathname in sicurezza
 function NavigationHeader() {
   const router = useRouter();
   const pathname = usePathname();
@@ -78,20 +77,18 @@ function NavigationHeader() {
     router.refresh();
   };
 
-  // Nasconde la TopBar nella radice ('/') e sulle rotte condivise esterne ('/share/...')
   if (pathname === '/' || isShareRoute) return null;
 
   return (
-    <header className="bg-[#050B14] border-b border-[#1E293B] w-full shrink-0 flex justify-center">
-      <div className="max-w-7xl w-full mx-auto px-6 md:px-8 py-4 flex flex-col md:flex-row justify-between items-center gap-4">
-        {/* Logo ufficiale collegato alla Dashboard */}
+    <header className="bg-[#050B14] border-b border-[#1E293B] w-full max-w-none shrink-0 p-[10px]">
+      <div className="w-full max-w-none flex flex-col md:flex-row justify-between items-center gap-3">
         <div className="flex items-center gap-3">
           <Link href="/dashboard" className="flex items-center gap-3 group cursor-pointer">
-            <div className="h-12 w-44 flex items-center">
+            <div className="h-10 w-40 flex items-center">
               <img
                 src="https://www.glaring.world/wp-content/uploads/2026/11/Glaring-Logo-S0S-White_Green.png"
                 alt="Glaring LLP Logo"
-                className="h-11 w-auto object-contain object-left"
+                className="h-9 w-auto object-contain object-left"
               />
             </div>
             <div className="hidden sm:block border-l border-gray-700 pl-3">
@@ -105,7 +102,6 @@ function NavigationHeader() {
           </Link>
         </div>
 
-        {/* Info utente e sessione dinamiche */}
         <div className="flex flex-wrap items-center justify-end gap-4 text-xs font-sans">
           <div className="flex items-center gap-2 text-white">
             <span className="font-bold">{userEmail || 'Caricamento...'}</span>
@@ -151,17 +147,17 @@ function LayoutShell({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <>
-      <Suspense fallback={<div className="h-16 bg-[#050B14] w-full" />}>
+    <div data-gos-layout="app" className="min-h-screen w-full flex flex-col">
+      <Suspense fallback={<div className="h-14 bg-[#050B14] w-full" />}>
         <NavigationHeader />
       </Suspense>
 
-      <main className="flex-1 max-w-7xl w-full mx-auto px-6 md:px-8 py-6 md:py-8 flex flex-col justify-center">
+      <main className="flex-1 w-full max-w-none p-[10px] flex flex-col">
         {children}
       </main>
 
-      <footer className="bg-[#0F172A] text-gray-300 py-4 w-full text-xs mt-auto border-t border-[#1E293B] shadow-inner shrink-0 flex justify-center">
-        <div className="max-w-7xl w-full mx-auto px-6 md:px-8 flex flex-col md:flex-row justify-between items-center gap-2 text-center md:text-left">
+      <footer className="bg-[#0F172A] text-gray-300 p-[10px] w-full max-w-none text-xs mt-auto border-t border-[#1E293B] shadow-inner shrink-0">
+        <div className="w-full max-w-none flex flex-col md:flex-row justify-between items-center gap-2 text-center md:text-left">
           <div>
             <span className="font-extrabold text-white">GOS 1.2</span> — Strategic &amp; Operation Advisors Infrastructure
           </div>
@@ -170,7 +166,7 @@ function LayoutShell({ children }: { children: React.ReactNode }) {
           </div>
         </div>
       </footer>
-    </>
+    </div>
   );
 }
 
@@ -183,7 +179,7 @@ export default function RootLayout({
     <html lang="it" suppressHydrationWarning>
       <body
         suppressHydrationWarning
-        className="bg-[#050B14] text-white antialiased min-h-screen flex flex-col items-center selection:bg-orange-600 selection:text-white"
+        className="bg-[#050B14] text-white antialiased min-h-screen w-full flex flex-col selection:bg-orange-600 selection:text-white"
       >
         <Suspense fallback={children}>
           <LayoutShell>{children}</LayoutShell>

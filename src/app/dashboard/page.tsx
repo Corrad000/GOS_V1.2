@@ -33,17 +33,18 @@ export default async function AdminDashboardPage() {
     .single();
 
   // Determina in modo sicuro se è admin in base a is_admin o ai vari valori possibili della colonna role
-  const isAdmin = profile?.is_admin === true || 
-                  profile?.role === 'admin' || 
-                  profile?.role === 'Administrator' || 
-                  profile?.role === 'amministratore';
+  const isAdmin =
+    profile?.is_admin === true ||
+    profile?.role === 'admin' ||
+    profile?.role === 'Administrator' ||
+    profile?.role === 'amministratore';
 
   const userRole = isAdmin ? 'admin' : 'user';
   const userName = profile?.nome || profile?.email || user.email || 'Utente Network';
 
   // 3. Recupero dinamico e filtrato delle aziende dalla tabella corretta gos_aziende
   let companiesList = [];
-  
+
   const query = supabase
     .from('gos_aziende')
     .select('*')
@@ -56,19 +57,17 @@ export default async function AdminDashboardPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-950 text-gray-100 space-y-10 p-6 md:p-10">
-      <div className="max-w-7xl mx-auto space-y-10">
-        
+    <div className="min-h-screen w-full bg-gray-950 text-gray-100 p-[10px]">
+      <div className="w-full space-y-4">
         {/* Vista principale della dashboard utente / admin */}
         <UserDashboardView
           userRole={userRole}
           userName={userName}
           companies={companiesList}
         />
-        
+
         {/* Widget di monitoraggio e log di sistema in tempo reale */}
         <SystemActivityWidget />
-
       </div>
     </div>
   );
