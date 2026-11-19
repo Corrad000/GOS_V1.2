@@ -1,8 +1,9 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { createBrowserClient } from '@supabase/ssr';
 import { CompanyItem, CompanyTable } from './CompanyTable';
+import { UsersTable } from './UsersTable';
 import { QuestCategory } from './QuestCategory';
 import { QuestModulo } from './QuestModulo';
 import { ModuleEditView } from './ModuleEditView';
@@ -17,6 +18,7 @@ interface UserDashboardViewProps {
 
 export function UserDashboardView({ userRole, userName, companies }: UserDashboardViewProps) {
   const [activeTab, setActiveTab] = useState<'aziende' | 'questionari' | 'offerte' | 'utenti'>('aziende');
+  const [localCompanies, setLocalCompanies] = useState<CompanyItem[]>(companies);
 
   // Stati Supabase per Categorie e Moduli Questionari Master
   const [categories, setCategories] = useState<any[]>([]);
@@ -52,10 +54,18 @@ export function UserDashboardView({ userRole, userName, companies }: UserDashboa
   const [editCategoryName, setEditCategoryName] = useState('');
   const [editCategoryDesc, setEditCategoryDesc] = useState('');
 
-  const supabase = createBrowserClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  const supabase = useMemo(
+    () =>
+      createBrowserClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+      ),
+    []
   );
+
+  useEffect(() => {
+    setLocalCompanies(companies);
+  }, [companies]);
 
   useEffect(() => {
     async function fetchSystemStats() {
@@ -65,7 +75,7 @@ export function UserDashboardView({ userRole, userName, companies }: UserDashboa
         const { count: profCount } = await supabase.from('gos_profiles').select('*', { count: 'exact', head: true });
 
         setStats({
-          totalCompanies: companies.length,
+          totalCompanies: localCompanies.length,
           totalModules: modCount || 0,
           totalCategories: catCount || 0,
           activeAdvisors: profCount || 1
@@ -75,7 +85,7 @@ export function UserDashboardView({ userRole, userName, companies }: UserDashboa
       }
     }
     fetchSystemStats();
-  }, [companies, supabase]);
+  }, [localCompanies, supabase]);
 
   useEffect(() => {
     if (activeTab !== 'questionari') return;
@@ -260,14 +270,12 @@ export function UserDashboardView({ userRole, userName, companies }: UserDashboa
     }
   };
 
-  // Calcolo reale del fatturato totale sommando il campo fatturato di ogni azienda
-  const totalPortfolioRevenue = companies.reduce((acc, c: any) => acc + Number(c.fatturato || c.revenue || 0), 0);
+  const totalPortfolioRevenue = localCompanies.reduce((acc, c: any) => acc + Number(c.fatturato || c.revenue || 0), 0);
 
   return (
     <div className="space-y-6">
-      
       {/* CRUSCOTTO REPORT IN CIMA */}
-      <div className="bg-[#0B132B] border border-gray-800 rounded-2xl p-6 space-y-4 shadow-xl">
+      <div className="bg-[#0B132B] border border-gray-800 rounded-none p-6 space-y-4 shadow-xl">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-2 border-b border-gray-800/80 pb-3">
           <div>
             <h2 className="text-base font-black text-white uppercase tracking-wider flex items-center gap-2">
@@ -275,37 +283,37 @@ export function UserDashboardView({ userRole, userName, companies }: UserDashboa
             </h2>
             <p className="text-xs text-gray-400 mt-0.5">Visione d&apos;insieme globale del business • Sincronizzato con Supabase</p>
           </div>
-          <span className="px-3 py-1 bg-gray-950 border border-gray-800 text-emerald-400 text-[11px] font-mono rounded-lg">
+          <span className="px-3 py-1 bg-gray-950 border border-gray-800 text-emerald-400 text-[11px] font-mono rounded-none">
             ● Live DB
           </span>
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <div className="bg-gray-950 border border-gray-800 rounded-xl p-4 space-y-1">
+          <div className="bg-gray-950 border border-gray-800 rounded-none p-4 space-y-1">
             <span className="text-[10px] font-mono font-bold uppercase text-gray-400 tracking-wider">Moduli / Categorie</span>
             <div className="text-lg font-black text-white font-mono">
               <span className="text-emerald-400">{stats.totalModules}</span> <span className="text-gray-600">/</span> <span className="text-blue-400">{stats.totalCategories}</span>
             </div>
           </div>
 
-          <div className="bg-gray-950 border border-gray-800 rounded-xl p-4 space-y-1">
+          <div className="bg-gray-950 border border-gray-800 rounded-none p-4 space-y-1">
             <span className="text-[10px] font-mono font-bold uppercase text-gray-400 tracking-wider">Fatturato Totale Portfolio</span>
             <div className="text-lg font-black text-emerald-400 font-mono">
               € {totalPortfolioRevenue.toLocaleString('it-IT')}
             </div>
           </div>
 
-          <div className="bg-gray-950 border border-gray-800 rounded-xl p-4 space-y-1">
+          <div className="bg-gray-950 border border-gray-800 rounded-none p-4 space-y-1">
             <span className="text-[10px] font-mono font-bold uppercase text-gray-400 tracking-wider">Profili / Advisor</span>
             <div className="text-base font-black text-white font-mono">
               <span className="text-emerald-400">{stats.activeAdvisors}</span> <span className="text-gray-400 font-normal text-xs">attivi</span>
             </div>
           </div>
 
-          <div className="bg-gray-950 border border-gray-800 rounded-xl p-4 space-y-1">
+          <div className="bg-gray-950 border border-gray-800 rounded-none p-4 space-y-1">
             <span className="text-[10px] font-mono font-bold uppercase text-gray-400 tracking-wider">Aziende in Portfolio</span>
             <div className="text-lg font-black text-[#FF5500] font-mono">
-              {companies.length}
+              {localCompanies.length}
             </div>
           </div>
         </div>
@@ -315,18 +323,18 @@ export function UserDashboardView({ userRole, userName, companies }: UserDashboa
       <div className="flex flex-wrap items-center gap-3 border-b border-gray-800 pb-4">
         <button
           onClick={() => { setActiveTab('aziende'); setActiveConfigModule(null); }}
-          className={`px-5 py-2.5 text-xs font-bold rounded-xl transition-all shadow-md cursor-pointer inline-flex items-center gap-2 ${
+          className={`px-5 py-2.5 text-xs font-bold rounded-none transition-all shadow-md cursor-pointer inline-flex items-center gap-2 ${
             activeTab === 'aziende'
               ? 'bg-[#FF5500] hover:bg-orange-600 text-white border border-orange-500 shadow-orange-950/50'
               : 'bg-[#0B132B] text-gray-400 border border-gray-800 hover:bg-gray-800 hover:text-white'
           }`}
         >
-          Controllo Aziende ({companies.length})
+          Controllo Aziende ({localCompanies.length})
         </button>
 
         <button
           onClick={() => { setActiveTab('questionari'); setActiveConfigModule(null); }}
-          className={`px-5 py-2.5 text-xs font-bold rounded-xl transition-all shadow-md cursor-pointer inline-flex items-center gap-2 ${
+          className={`px-5 py-2.5 text-xs font-bold rounded-none transition-all shadow-md cursor-pointer inline-flex items-center gap-2 ${
             activeTab === 'questionari'
               ? 'bg-[#FF5500] hover:bg-orange-600 text-white border border-orange-500 shadow-orange-950/50'
               : 'bg-[#0B132B] text-gray-400 border border-gray-800 hover:bg-gray-800 hover:text-white'
@@ -337,7 +345,7 @@ export function UserDashboardView({ userRole, userName, companies }: UserDashboa
 
         <button
           onClick={() => { setActiveTab('offerte'); setActiveConfigModule(null); }}
-          className={`px-5 py-2.5 text-xs font-bold rounded-xl transition-all shadow-md cursor-pointer inline-flex items-center gap-2 ${
+          className={`px-5 py-2.5 text-xs font-bold rounded-none transition-all shadow-md cursor-pointer inline-flex items-center gap-2 ${
             activeTab === 'offerte'
               ? 'bg-[#FF5500] hover:bg-orange-600 text-white border border-orange-500 shadow-orange-950/50'
               : 'bg-[#0B132B] text-gray-400 border border-gray-800 hover:bg-gray-800 hover:text-white'
@@ -348,7 +356,7 @@ export function UserDashboardView({ userRole, userName, companies }: UserDashboa
 
         <button
           onClick={() => { setActiveTab('utenti'); setActiveConfigModule(null); }}
-          className={`px-5 py-2.5 text-xs font-bold rounded-xl transition-all shadow-md cursor-pointer inline-flex items-center gap-2 ${
+          className={`px-5 py-2.5 text-xs font-bold rounded-none transition-all shadow-md cursor-pointer inline-flex items-center gap-2 ${
             activeTab === 'utenti'
               ? 'bg-[#FF5500] hover:bg-orange-600 text-white border border-orange-500 shadow-orange-950/50'
               : 'bg-[#0B132B] text-gray-400 border border-gray-800 hover:bg-gray-800 hover:text-white'
@@ -360,10 +368,14 @@ export function UserDashboardView({ userRole, userName, companies }: UserDashboa
 
       {activeTab === 'aziende' && (
         <CompanyTable
-          companies={companies}
+          companies={localCompanies}
           title="CONTROLLO AZIENDE"
           subtitle="Panoramica di tutte le aziende inserite nel database, advisor di riferimento e contratti attivi."
           showRegisterButton={true}
+          onCompaniesDeleted={(deletedIds) => {
+            const deletedSet = new Set(deletedIds);
+            setLocalCompanies((prev) => prev.filter((c) => !deletedSet.has(c.id)));
+          }}
         />
       )}
 
@@ -405,8 +417,8 @@ export function UserDashboardView({ userRole, userName, companies }: UserDashboa
 
       {/* MODALE CREAZIONE MODULO MASTER */}
       {showModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-gray-900 border border-gray-800 rounded-2xl max-w-lg w-full p-6 space-y-6 shadow-2xl">
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
+          <div className="bg-gray-900 border border-gray-800 rounded-none max-w-lg w-full p-6 space-y-6 shadow-2xl">
             <div className="flex justify-between items-center border-b border-gray-800 pb-4">
               <div>
                 <h3 className="text-sm font-extrabold text-white uppercase tracking-wider">Crea Nuovo Modulo Master</h3>
@@ -423,7 +435,7 @@ export function UserDashboardView({ userRole, userName, companies }: UserDashboa
                   placeholder="Es. Analisi Redditività Operativa v1"
                   value={newTitle}
                   onChange={(e) => setNewTitle(e.target.value)}
-                  className="w-full bg-gray-950 border border-gray-700 px-3.5 py-2.5 rounded-xl text-white text-xs focus:outline-none focus:border-[#FF5500]"
+                  className="w-full bg-gray-950 border border-gray-700 px-3.5 py-2.5 rounded-none text-white text-xs focus:outline-none focus:border-[#FF5500]"
                   required
                 />
               </div>
@@ -435,7 +447,7 @@ export function UserDashboardView({ userRole, userName, companies }: UserDashboa
                   placeholder="Es. Qual è il margine EBITDA target per il prossimo trimestre?"
                   value={newDomanda}
                   onChange={(e) => setNewDomanda(e.target.value)}
-                  className="w-full bg-gray-950 border border-gray-700 px-3.5 py-2.5 rounded-xl text-white text-xs focus:outline-none focus:border-[#FF5500]"
+                  className="w-full bg-gray-950 border border-gray-700 px-3.5 py-2.5 rounded-none text-white text-xs focus:outline-none focus:border-[#FF5500]"
                   required
                 />
               </div>
@@ -445,7 +457,7 @@ export function UserDashboardView({ userRole, userName, companies }: UserDashboa
                 <select
                   value={newTipoRisposta}
                   onChange={(e) => setNewTipoRisposta(e.target.value)}
-                  className="w-full bg-gray-950 border border-gray-700 px-3.5 py-2.5 rounded-xl text-white text-xs focus:outline-none focus:border-[#FF5500]"
+                  className="w-full bg-gray-950 border border-gray-700 px-3.5 py-2.5 rounded-none text-white text-xs focus:outline-none focus:border-[#FF5500]"
                 >
                   <option value="rating_1_5">Valutazione numerica (1 a 5)</option>
                   <option value="text">Testo libero</option>
@@ -455,8 +467,8 @@ export function UserDashboardView({ userRole, userName, companies }: UserDashboa
               </div>
 
               <div className="flex justify-end gap-3 pt-4 border-t border-gray-800">
-                <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-bold rounded-xl cursor-pointer">Annulla</button>
-                <button type="submit" className="px-5 py-2 bg-[#FF5500] hover:bg-orange-600 text-white text-xs font-bold rounded-xl shadow cursor-pointer uppercase tracking-wider">Salva in Supabase</button>
+                <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-bold rounded-none cursor-pointer">Annulla</button>
+                <button type="submit" className="px-5 py-2 bg-[#FF5500] hover:bg-orange-600 text-white text-xs font-bold rounded-none shadow cursor-pointer uppercase tracking-wider">Salva in Supabase</button>
               </div>
             </form>
           </div>
@@ -465,8 +477,8 @@ export function UserDashboardView({ userRole, userName, companies }: UserDashboa
 
       {/* MODALE CREAZIONE CATEGORIA MASTER */}
       {showCategoryModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-gray-900 border border-gray-800 rounded-2xl max-w-lg w-full p-6 space-y-6 shadow-2xl">
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
+          <div className="bg-gray-900 border border-gray-800 rounded-none max-w-lg w-full p-6 space-y-6 shadow-2xl">
             <div className="flex justify-between items-center border-b border-gray-800 pb-4">
               <div>
                 <h3 className="text-sm font-extrabold text-white uppercase tracking-wider">Crea Nuova Categoria Master</h3>
@@ -483,7 +495,7 @@ export function UserDashboardView({ userRole, userName, companies }: UserDashboa
                   placeholder="Es. Risk Management & Sicurezza"
                   value={newCategoryName}
                   onChange={(e) => setNewCategoryName(e.target.value)}
-                  className="w-full bg-gray-950 border border-gray-700 px-3.5 py-2.5 rounded-xl text-white text-xs focus:outline-none focus:border-[#FF5500]"
+                  className="w-full bg-gray-950 border border-gray-700 px-3.5 py-2.5 rounded-none text-white text-xs focus:outline-none focus:border-[#FF5500]"
                   required
                 />
               </div>
@@ -495,13 +507,13 @@ export function UserDashboardView({ userRole, userName, companies }: UserDashboa
                   placeholder="Descrivi l'ambito di analisi di questa categoria..."
                   value={newCategoryDesc}
                   onChange={(e) => setNewCategoryDesc(e.target.value)}
-                  className="w-full bg-gray-950 border border-gray-700 px-3.5 py-2.5 rounded-xl text-white text-xs focus:outline-none focus:border-[#FF5500]"
+                  className="w-full bg-gray-950 border border-gray-700 px-3.5 py-2.5 rounded-none text-white text-xs focus:outline-none focus:border-[#FF5500]"
                 />
               </div>
 
               <div className="flex justify-end gap-3 pt-4 border-t border-gray-800">
-                <button type="button" onClick={() => setShowCategoryModal(false)} className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-bold rounded-xl cursor-pointer">Annulla</button>
-                <button type="submit" className="px-5 py-2 bg-[#FF5500] hover:bg-orange-600 text-white text-xs font-bold rounded-xl shadow cursor-pointer uppercase tracking-wider">Salva Categoria</button>
+                <button type="button" onClick={() => setShowCategoryModal(false)} className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-bold rounded-none cursor-pointer">Annulla</button>
+                <button type="submit" className="px-5 py-2 bg-[#FF5500] hover:bg-orange-600 text-white text-xs font-bold rounded-none shadow cursor-pointer uppercase tracking-wider">Salva Categoria</button>
               </div>
             </form>
           </div>
@@ -510,8 +522,8 @@ export function UserDashboardView({ userRole, userName, companies }: UserDashboa
 
       {/* MODALE MODIFICA CATEGORIA MASTER */}
       {showEditCategoryModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-gray-900 border border-gray-800 rounded-2xl max-w-lg w-full p-6 space-y-6 shadow-2xl">
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
+          <div className="bg-gray-900 border border-gray-800 rounded-none max-w-lg w-full p-6 space-y-6 shadow-2xl">
             <div className="flex justify-between items-center border-b border-gray-800 pb-4">
               <div>
                 <h3 className="text-sm font-extrabold text-white uppercase tracking-wider">Modifica Categoria Master</h3>
@@ -527,7 +539,7 @@ export function UserDashboardView({ userRole, userName, companies }: UserDashboa
                   type="text"
                   value={editCategoryName}
                   onChange={(e) => setEditCategoryName(e.target.value)}
-                  className="w-full bg-gray-950 border border-gray-700 px-3.5 py-2.5 rounded-xl text-white text-xs focus:outline-none focus:border-[#FF5500]"
+                  className="w-full bg-gray-950 border border-gray-700 px-3.5 py-2.5 rounded-none text-white text-xs focus:outline-none focus:border-[#FF5500]"
                   required
                 />
               </div>
@@ -538,13 +550,13 @@ export function UserDashboardView({ userRole, userName, companies }: UserDashboa
                   rows={3}
                   value={editCategoryDesc}
                   onChange={(e) => setEditCategoryDesc(e.target.value)}
-                  className="w-full bg-gray-950 border border-gray-700 px-3.5 py-2.5 rounded-xl text-white text-xs focus:outline-none focus:border-[#FF5500]"
+                  className="w-full bg-gray-950 border border-gray-700 px-3.5 py-2.5 rounded-none text-white text-xs focus:outline-none focus:border-[#FF5500]"
                 />
               </div>
 
               <div className="flex justify-end gap-3 pt-4 border-t border-gray-800">
-                <button type="button" onClick={() => setShowEditCategoryModal(false)} className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-bold rounded-xl cursor-pointer">Annulla</button>
-                <button type="submit" className="px-5 py-2 bg-[#FF5500] hover:bg-orange-600 text-white text-xs font-bold rounded-xl shadow cursor-pointer uppercase tracking-wider">Salva Modifiche</button>
+                <button type="button" onClick={() => setShowEditCategoryModal(false)} className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-bold rounded-none cursor-pointer">Annulla</button>
+                <button type="submit" className="px-5 py-2 bg-[#FF5500] hover:bg-orange-600 text-white text-xs font-bold rounded-none shadow cursor-pointer uppercase tracking-wider">Salva Modifiche</button>
               </div>
             </form>
           </div>
@@ -552,11 +564,8 @@ export function UserDashboardView({ userRole, userName, companies }: UserDashboa
       )}
 
       {activeTab === 'utenti' && (
-        <div className="bg-[#0B132B] border border-gray-800 rounded-2xl p-6 text-xs text-gray-400 font-mono">
-          [Gestione Utenti & Permessi di Sistema sincronizzata con gos_profiles]
-        </div>
+        <UsersTable currentUserRole={userRole} currentUserEmail={userName} />
       )}
-
     </div>
   );
 }

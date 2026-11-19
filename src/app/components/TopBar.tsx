@@ -1,18 +1,33 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { createBrowserClient } from '@supabase/ssr';
 import { useRouter, usePathname } from 'next/navigation';
+
+function formatNameFromEmail(email?: string): string {
+  if (!email) return 'Utente';
+  const localPart = email.split('@')[0] || '';
+  return (
+    localPart
+      .replace(/[._-]+/g, ' ')
+      .replace(/\b\w/g, (char) => char.toUpperCase())
+      .trim() || 'Utente'
+  );
+}
 
 export default function TopBar() {
   const router = useRouter();
   const pathname = usePathname();
-  const [userEmail, setUserEmail] = useState<string>('');
+  const [greetingName, setGreetingName] = useState<string>('Utente');
   const [loading, setLoading] = useState<boolean>(true);
 
-  const supabase = createBrowserClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  const supabase = useMemo(
+    () =>
+      createBrowserClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+      ),
+    []
   );
 
   // Nasconde completamente la Topbar sulle rotte condivise esterne (es. /share/kronos/[id])
@@ -24,19 +39,71 @@ export default function TopBar() {
       return;
     }
 
-    async function loadCurrentUser() {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+    let active = true;
 
-      if (user) {
-        setUserEmail(user.email || '');
+    async function loadCurrentUser() {
+      setLoading(true);
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+
+        if (!user) {
+          if (active) {
+            setGreetingName('Utente');
+            setLoading(false);
+          }
+          return;
+        }
+
+        let resolvedName =
+          user.user_metadata?.full_name ||
+          user.user_metadata?.name ||
+          formatNameFromEmail(user.email);
+
+        try {
+          const { data: profiles } = await supabase
+            .from('gos_profiles')
+            .select('id, email, full_name, nome');
+
+          if (Array.isArray(profiles)) {
+            const matched = profiles.find(
+              (p: any) =>
+                (user.email &&
+                  (p.email || '').toLowerCase() === user.email.toLowerCase()) ||
+                p.id === user.id
+            );
+            if (matched?.full_name || matched?.nome) {
+              resolvedName = matched.full_name || matched.nome;
+            }
+          }
+        } catch {
+          // Mantiene il fallback derivato dall'utente auth
+        }
+
+        if (active) {
+          setGreetingName(resolvedName);
+        }
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
       }
-      setLoading(false);
     }
 
     loadCurrentUser();
-  }, [supabase, isShareRoute]);
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(() => {
+      loadCurrentUser();
+    });
+
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+    };
+  }, [supabase, isShareRoute, pathname]);
 
   if (isShareRoute) {
     return null;
@@ -56,19 +123,19 @@ export default function TopBar() {
 
       <div className="flex items-center gap-6">
         <span className="font-mono text-gray-200">
-          {loading ? 'Caricamento...' : userEmail}
+          {loading ? 'Caricamento...' : `Ciao ${greetingName}`}
         </span>
 
         <button
           onClick={() => router.push('/profile')}
-          className="px-3 py-1.5 bg-gray-900 hover:bg-gray-800 border border-gray-700 rounded-lg text-white font-semibold transition-all cursor-pointer"
+          className="px-3 py-1.5 bg-gray-900 hover:bg-gray-800 border border-gray-700 rounded-none text-white font-semibold transition-all cursor-pointer"
         >
           Edit Profile
         </button>
 
         <button
           onClick={handleLogout}
-          className="px-3 py-1.5 bg-red-950/40 hover:bg-red-900/60 border border-red-800 text-red-300 rounded-lg font-semibold transition-all cursor-pointer"
+          className="px-3 py-1.5 bg-red-950/40 hover:bg-red-900/60 border border-red-800 text-red-300 rounded-none font-semibold transition-all cursor-pointer"
         >
           Log-out
         </button>

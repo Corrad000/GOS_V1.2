@@ -1,29 +1,110 @@
 'use client';
 
-interface AnagraficaViewProps {
-  company: {
-    ragione_sociale?: string;
-    codice_azienda?: string;
-    partita_iva?: string;
-    codice_fiscale?: string;
-    categoria?: string;
-    indirizzo?: string;
-    citta?: string;
-    nazione?: string;
-    sito_web?: string;
-    referente?: string;
-    email?: string;
-    telefono?: string;
-    note?: string;
-    advisor_nome?: string;
-    fatturato?: number;
-    contratti_attivi?: number;
-    stato?: string;
-  };
-  onEdit?: () => void;
+import React, { useState, useEffect, useMemo } from 'react';
+import { createBrowserClient } from '@supabase/ssr';
+
+export type CompanyStatusModalita =
+  | 'LAVORAZIONE'
+  | 'DATABASE'
+  | 'CHIUSO'
+  | 'FOLLOW-UP';
+
+export interface AnagraficaCompanyData {
+  id?: string;
+  ragione_sociale?: string;
+  codice_azienda?: string;
+  partita_iva?: string;
+  codice_fiscale?: string;
+  categoria?: string;
+  indirizzo?: string;
+  citta?: string;
+  nazione?: string;
+  sito_web?: string;
+  referente?: string;
+  email?: string;
+  telefono?: string;
+  note?: string;
+  advisor_nome?: string;
+  fatturato?: number;
+  contratti_attivi?: number;
+  stato?: string;
+  modalita?: CompanyStatusModalita | string;
+  [key: string]: any;
 }
 
-export function AnagraficaView({ company, onEdit }: AnagraficaViewProps) {
+interface AnagraficaViewProps {
+  company: AnagraficaCompanyData;
+  onEdit?: () => void;
+  onCompanyUpdated?: (updatedCompany: AnagraficaCompanyData) => void;
+}
+
+function normalizeModalita(val?: string): CompanyStatusModalita {
+  const upper = String(val || '').trim().toUpperCase();
+  if (upper === 'LAVORAZIONE' || upper === 'IN_LAVORAZIONE' || upper === 'IN LAVORAZIONE') {
+    return 'LAVORAZIONE';
+  }
+  if (upper === 'CHIUSO' || upper === 'CHIUSA') {
+    return 'CHIUSO';
+  }
+  if (upper === 'FOLLOW-UP' || upper === 'FOLLOW UP' || upper === 'FOLLOWUP') {
+    return 'FOLLOW-UP';
+  }
+  return 'DATABASE';
+}
+
+export function AnagraficaView({
+  company,
+  onEdit,
+  onCompanyUpdated,
+}: AnagraficaViewProps) {
+  const [modalita, setModalita] = useState<CompanyStatusModalita>(
+    normalizeModalita(company?.modalita)
+  );
+  const [savingStatus, setSavingStatus] = useState<boolean>(false);
+
+  const supabase = useMemo(
+    () =>
+      createBrowserClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+      ),
+    []
+  );
+
+  useEffect(() => {
+    setModalita(normalizeModalita(company?.modalita));
+  }, [company?.id, company?.modalita]);
+
+  const handleStatusChange = async (nextStatus: CompanyStatusModalita) => {
+    const previousStatus = modalita;
+    setModalita(nextStatus);
+
+    if (!company?.id) {
+      onCompanyUpdated?.({ ...company, modalita: nextStatus });
+      return;
+    }
+
+    setSavingStatus(true);
+    try {
+      const { data, error } = await supabase
+        .from('gos_aziende')
+        .update({ modalita: nextStatus })
+        .eq('id', company.id)
+        .select('*')
+        .maybeSingle();
+
+      if (error) throw error;
+
+      const merged = data ? { ...company, ...data, modalita: nextStatus } : { ...company, modalita: nextStatus };
+      onCompanyUpdated?.(merged);
+    } catch (err: any) {
+      setModalita(previousStatus);
+      alert('Errore durante il salvataggio dello status azienda: ' + (err?.message || err));
+    } finally {
+      setSavingStatus(false);
+    }
+  };
+
   // Funzione di utilità per validare l'effettiva presenza di informazioni reali
   const isValid = (val: any) => {
     if (val === undefined || val === null || val === '') return false;
@@ -102,19 +183,47 @@ export function AnagraficaView({ company, onEdit }: AnagraficaViewProps) {
 
   return (
     <div className="bg-gray-900 border border-gray-800 p-6 rounded-2xl space-y-6 shadow-xl">
-      <div className="flex justify-between items-center border-b border-gray-800 pb-4">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 border-b border-gray-800 pb-4">
         <div>
           <h3 className="text-base font-bold text-white uppercase tracking-wider">Scheda Anagrafica Azienda</h3>
           <p className="text-xs text-gray-400 mt-0.5">Informazioni societarie e dati di riferimento</p>
         </div>
-        {onEdit && (
-          <button
-            onClick={onEdit}
-            className="px-4 py-2 bg-[#FF5500] hover:bg-orange-600 text-white text-xs font-bold rounded-xl shadow-lg shadow-orange-950/50 transition-all cursor-pointer uppercase tracking-wider"
-          >
-            Modifica Dati
-          </button>
-        )}
+
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2 bg-gray-950 border border-gray-700 rounded-xl px-3 py-1.5">
+            <label
+              htmlFor="company-status-select"
+              className="text-[10px] font-mono font-bold uppercase text-amber-400 whitespace-nowrap"
+            >
+              Status
+            </label>
+            <select
+              id="company-status-select"
+              value={modalita}
+              disabled={savingStatus}
+              onChange={(e) => handleStatusChange(e.target.value as CompanyStatusModalita)}
+              className="bg-gray-900 text-white text-xs font-bold uppercase px-2.5 py-1 rounded-lg border border-gray-700 focus:outline-none focus:border-[#FF5500] cursor-pointer disabled:opacity-60"
+            >
+              <option value="LAVORAZIONE">LAVORAZIONE</option>
+              <option value="DATABASE">DATABASE</option>
+              <option value="CHIUSO">CHIUSO</option>
+              <option value="FOLLOW-UP">FOLLOW-UP</option>
+            </select>
+            {savingStatus && (
+              <span className="text-[10px] font-mono text-gray-400">Salvataggio...</span>
+            )}
+          </div>
+
+          {onEdit && (
+            <button
+              type="button"
+              onClick={onEdit}
+              className="px-4 py-2 bg-[#FF5500] hover:bg-orange-600 text-white text-xs font-bold rounded-xl shadow-lg shadow-orange-950/50 transition-all cursor-pointer uppercase tracking-wider"
+            >
+              Modifica Dati
+            </button>
+          )}
+        </div>
       </div>
 
       {activeFields.length === 0 ? (

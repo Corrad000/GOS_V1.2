@@ -1,392 +1,457 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import React, { useEffect, useState, useMemo, Suspense } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { createBrowserClient } from '@supabase/ssr';
 
-export default function ProfilePage() {
-  const [loading, setLoading] = useState(false);
+function ProfilePageContent() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const targetIdFromQuery = searchParams?.get('id') || '';
+
+  const [profile, setProfile] = useState<any | null>(null);
+  const [loggedInProfile, setLoggedInProfile] = useState<any | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [uploadingImage, setUploadingImage] = useState(false);
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [sendingReset, setSendingReset] = useState(false);
 
-  // Campi del profilo
-  const [fullName, setFullName] = useState('');
+  const [utente, setUtente] = useState('');
   const [email, setEmail] = useState('');
-  const [role, setRole] = useState('');
-  const [avatarUrl, setAvatarUrl] = useState('');
-  
-  // Dati anagrafici, contatto ed emergenza
-  const [phone, setPhone] = useState('');
-  const [emergencyContactName, setEmergencyContactName] = useState('');
-  const [emergencyContactPhone, setEmergencyContactPhone] = useState('');
-  const [status, setStatus] = useState<'Active' | 'Busy' | 'Away' | 'Offline'>('Active');
-  
-  // Indirizzo
-  const [addressStreet, setAddressStreet] = useState('');
-  const [addressNumber, setAddressNumber] = useState('');
-  const [addressPostalCode, setAddressPostalCode] = useState('');
-  const [addressCity, setAddressCity] = useState('');
-  const [addressRegion, setAddressRegion] = useState('');
-  const [addressCountry, setAddressCountry] = useState('');
+  const [ruolo, setRuolo] = useState('user');
+  const [stato, setStato] = useState('ATTIVO');
+  const [permessi, setPermessi] = useState({
+    aziende: true,
+    questionari: true,
+    offerte: true,
+    utenti: false,
+  });
 
-  const supabase = createBrowserClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  const supabase = useMemo(
+    () =>
+      createBrowserClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+      ),
+    []
   );
 
+  const actorRole = useMemo(() => {
+    return (loggedInProfile?.role || loggedInProfile?.ruolo || '').toLowerCase();
+  }, [loggedInProfile]);
+
+  const isSuperAdmin = actorRole === 'superadmin';
+
   useEffect(() => {
-    async function loadUserProfile() {
+    let active = true;
+
+    async function loadProfileData() {
+      setLoading(true);
+      setErrorMsg(null);
+
       try {
-        setLoading(true);
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-          setEmail(user.email || '');
-          if (user.user_metadata?.full_name) setFullName(user.user_metadata.full_name);
-          if (user.user_metadata?.role) setRole(user.user_metadata.role);
-          if (user.user_metadata?.phone) setPhone(user.user_metadata.phone);
-          if (user.user_metadata?.emergencyContactName) setEmergencyContactName(user.user_metadata.emergencyContactName);
-          if (user.user_metadata?.emergencyContactPhone) setEmergencyContactPhone(user.user_metadata.emergencyContactPhone);
-          if (user.user_metadata?.status) setStatus(user.user_metadata.status);
-          if (user.user_metadata?.avatar_url) setAvatarUrl(user.user_metadata.avatar_url);
-          
-          const addr = user.user_metadata?.address;
-          if (addr) {
-            setAddressStreet(addr.street || '');
-            setAddressNumber(addr.number || '');
-            setAddressPostalCode(addr.postalCode || '');
-            setAddressCity(addr.city || '');
-            setAddressRegion(addr.region || '');
-            setAddressCountry(addr.country || '');
-          }
+        const { data: authData } = await supabase.auth.getUser();
+        const authUser = authData?.user || null;
+
+        let currentUserRow: any = null;
+        const { data: allProfiles } = await supabase.from('gos_profiles').select('*');
+
+        if (authUser?.email && Array.isArray(allProfiles)) {
+          currentUserRow =
+            allProfiles.find(
+              (p: any) => (p.email || '').toLowerCase() === authUser.email!.toLowerCase()
+            ) || null;
         }
-      } catch (error) {
-        console.error('Errore nel caricamento del profilo:', error);
+
+        if (!currentUserRow && authUser?.id && Array.isArray(allProfiles)) {
+          currentUserRow =
+            allProfiles.find((p: any) => p.id === authUser.id) || null;
+        }
+
+        if (active) {
+          setLoggedInProfile(currentUserRow);
+        }
+
+        const targetId = targetIdFromQuery || currentUserRow?.id || '';
+
+        if (!targetId) {
+          if (active) {
+            setProfile(null);
+            setErrorMsg(
+              authUser?.email
+                ? `Nessun profilo trovato in gos_profiles per ${authUser.email}.`
+                : 'Nessun utente loggato e nessun ID profilo specificato.'
+            );
+          }
+          return;
+        }
+
+        const res = await fetch(`/api/utenti/${encodeURIComponent(targetId)}`, {
+          cache: 'no-store',
+        });
+        const json = await res.json();
+        if (!res.ok) {
+          throw new Error(json?.error || 'Errore nel caricamento del profilo.');
+        }
+
+        const targetRow = json.profile;
+        if (!targetRow) {
+          throw new Error('Profilo non trovato.');
+        }
+
+        if (active) {
+          setProfile(targetRow);
+          setUtente(targetRow.full_name || targetRow.nome || '');
+          setEmail(targetRow.email || '');
+          setRuolo(targetRow.role || targetRow.ruolo || 'user');
+          setStato(targetRow.stato || targetRow.status || 'ATTIVO');
+          setPermessi({
+            aziende: targetRow.permessi?.aziende ?? true,
+            questionari: targetRow.permessi?.questionari ?? true,
+            offerte: targetRow.permessi?.offerte ?? true,
+            utenti: targetRow.permessi?.utenti ?? false,
+          });
+        }
+      } catch (err: any) {
+        if (active) {
+          setErrorMsg(err?.message || 'Errore nel caricamento del profilo.');
+        }
       } finally {
-        setLoading(false);
+        if (active) {
+          setLoading(false);
+        }
       }
     }
-    loadUserProfile();
-  }, [supabase]);
 
-  // Gestione dell'upload dell'immagine su Supabase Storage
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    try {
-      const files = e.target.files;
-      if (!files || files.length === 0) return;
-      
-      const file = files[0];
-      setUploadingImage(true);
-      setMessage(null);
-
-      const fileExt = file.name.split('.').pop();
-      const fileName = `avatar-${Math.random().toString(36).substring(2)}-${Date.now()}.${fileExt}`;
-      const filePath = `${fileName}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from('avatars')
-        .upload(filePath, file);
-
-      if (uploadError) {
-        throw uploadError;
-      }
-
-      const { data: { publicUrl } } = supabase.storage
-        .from('avatars')
-        .getPublicUrl(filePath);
-
-      setAvatarUrl(publicUrl);
-      setMessage({ type: 'success', text: 'Immagine caricata con successo! Ricorda di salvare le modifiche.' });
-    } catch (err: any) {
-      setMessage({ type: 'error', text: err.message || "Errore durante l'upload dell'immagine. Assicurati che esista il bucket 'avatars' su Supabase." });
-    } finally {
-      setUploadingImage(false);
-    }
-  };
+    loadProfileData();
+    return () => {
+      active = false;
+    };
+  }, [targetIdFromQuery, supabase]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!profile || !isSuperAdmin) return;
     setSaving(true);
-    setMessage(null);
 
     try {
-      const { error } = await supabase.auth.updateUser({
-        data: {
-          full_name: fullName,
-          phone,
-          emergencyContactName,
-          emergencyContactPhone,
-          status,
-          avatar_url: avatarUrl,
-          address: {
-            street: addressStreet,
-            number: addressNumber,
-            postalCode: addressPostalCode,
-            city: addressCity,
-            region: addressRegion,
-            country: addressCountry
-          }
-        }
+      const res = await fetch(`/api/utenti/${encodeURIComponent(profile.id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          actorRole: loggedInProfile?.role || loggedInProfile?.ruolo || 'user',
+          updates: {
+            utente,
+            email,
+            ruolo,
+            stato,
+            permessi,
+          },
+        }),
       });
+      const json = await res.json();
+      if (!res.ok) {
+        throw new Error(json?.error || 'Errore durante il salvataggio.');
+      }
 
-      if (error) throw error;
-
-      setMessage({ type: 'success', text: 'Profilo, anagrafica e contatti di emergenza aggiornati con successo!' });
+      setProfile(json.profile);
+      alert('Profilo aggiornato su Supabase.');
     } catch (err: any) {
-      setMessage({ type: 'error', text: err.message || 'Errore durante il salvataggio.' });
+      alert('Errore durante il salvataggio: ' + (err?.message || err));
     } finally {
       setSaving(false);
     }
   };
 
+  const handlePasswordReset = async () => {
+    if (!isSuperAdmin || !email) return;
+    setSendingReset(true);
+
+    try {
+      const res = await fetch('/api/utenti/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email,
+          actorRole: loggedInProfile?.role || loggedInProfile?.ruolo || 'user',
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || 'Errore reset password.');
+      alert(`Email di reset password inviata a ${email}.`);
+    } catch (err: any) {
+      alert('Errore reset password: ' + (err?.message || err));
+    } finally {
+      setSendingReset(false);
+    }
+  };
+
   if (loading) {
     return (
-      <div className="flex justify-center items-center py-20 text-gray-400 font-mono text-sm">
-        Caricamento profilo in corso...
+      <div className="min-h-screen bg-gray-950 text-gray-300 p-8 font-mono text-xs">
+        Caricamento profilo da gos_profiles...
       </div>
     );
   }
 
-  return (
-    <div className="max-w-4xl mx-auto space-y-6 pb-12">
-      
-      {/* Breadcrumb di Navigazione */}
-      <nav className="flex items-center gap-2 text-xs text-gray-400">
-        <Link 
-          href="/dashboard" 
-          className="hover:text-white transition-colors flex items-center gap-1.5"
-        >
-          <span>←</span> Torna alla Dashboard
-        </Link>
-        <span className="text-gray-700">/</span>
-        <span className="text-emerald-400 font-medium">Profilo Utente</span>
-      </nav>
-
-      {/* Intestazione */}
-      <div>
-        <h1 className="text-xl font-extrabold text-white tracking-tight">Profilo Utente & Anagrafica</h1>
-        <p className="text-xs text-gray-400 mt-1">Gestisci le tue informazioni personali, foto, contatti, indirizzo e stato operativo.</p>
-      </div>
-
-      {message && (
-        <div className={`p-4 text-xs font-medium border ${message.type === 'success' ? 'bg-emerald-950/40 border-emerald-800 text-emerald-300' : 'bg-red-950/40 border-red-800 text-red-300'}`}>
-          {message.text}
+  if (!profile) {
+    return (
+      <div className="min-h-screen bg-gray-950 text-white p-8">
+        <div className="max-w-2xl mx-auto bg-gray-900 border border-gray-800 rounded-none p-6 space-y-4">
+          <div className="text-xs font-bold text-red-400">
+            {errorMsg || 'Profilo utente non trovato.'}
+          </div>
+          <Link
+            href="/dashboard"
+            className="inline-flex items-center px-4 py-2 bg-gray-800 hover:bg-gray-700 text-white text-xs font-bold uppercase rounded-none"
+          >
+            ← Torna alla Dashboard
+          </Link>
         </div>
-      )}
+      </div>
+    );
+  }
 
-      {/* Form Principale */}
-      <form onSubmit={handleSave} className="bg-[#0F172A] border border-[#1E293B] p-6 space-y-6 shadow-xl">
-        
-        {/* Sezione Foto Profilo con Upload */}
-        <div className="flex flex-col sm:flex-row items-center gap-6 pb-6 border-b border-[#1E293B]">
-          <div className="relative w-20 h-20 rounded-full overflow-hidden border-2 border-gray-700 bg-gray-900 shrink-0 flex items-center justify-center">
-            {avatarUrl ? (
-              <img 
-                src={avatarUrl} 
-                alt="Avatar" 
-                className="w-full h-full object-cover"
+  const isOnline =
+    typeof profile.is_online === 'boolean'
+      ? profile.is_online
+      : profile.last_seen_at
+      ? Date.now() - new Date(profile.last_seen_at).getTime() <= 5 * 60 * 1000
+      : false;
+
+  const isSelfProfile =
+    loggedInProfile &&
+    (loggedInProfile.id === profile.id ||
+      (loggedInProfile.email &&
+        profile.email &&
+        loggedInProfile.email.toLowerCase() === profile.email.toLowerCase()));
+
+  const extraEntries = Object.entries(profile).filter(
+    ([key]) =>
+      ![
+        'id',
+        'codice_utente',
+        'email',
+        'full_name',
+        'nome',
+        'role',
+        'ruolo',
+        'stato',
+        'status',
+        'permessi',
+        'is_online',
+        'last_seen_at',
+      ].includes(key)
+  );
+
+  return (
+    <div className="min-h-screen bg-gray-950 text-white p-6 md:p-10">
+      <div className="max-w-4xl mx-auto bg-gray-900 border border-gray-800 rounded-none p-6 space-y-6 shadow-xl">
+        <div className="flex flex-wrap items-start justify-between gap-4 border-b border-gray-800 pb-4">
+          <div className="space-y-1">
+            <div className="text-[11px] font-mono text-amber-400 uppercase">
+              {profile.codice_utente || 'USR-00000'}
+            </div>
+            <h1 className="text-lg font-black uppercase tracking-wider inline-flex items-center gap-2">
+              <span
+                title={isOnline ? 'In linea' : 'Non in linea'}
+                style={{
+                  width: '9px',
+                  height: '9px',
+                  borderRadius: '9999px',
+                  backgroundColor: isOnline ? '#10b981' : '#ef4444',
+                  display: 'inline-block',
+                }}
               />
+              <span>{utente || email || profile.id}</span>
+            </h1>
+            <p className="text-xs text-gray-400">
+              {isSelfProfile
+                ? 'Profilo dell’utente attualmente loggato'
+                : 'Scheda dettaglio profilo selezionato'}{' '}
+              • Sessione attiva:{' '}
+              <strong className="text-gray-200">
+                {loggedInProfile?.email || 'Non autenticato'}
+              </strong>{' '}
+              ({actorRole || 'ospite'})
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {targetIdFromQuery && loggedInProfile && !isSelfProfile && (
+              <Link
+                href="/profile"
+                className="px-3.5 py-2 bg-gray-800 hover:bg-gray-700 text-amber-300 text-xs font-bold uppercase rounded-none"
+              >
+                Mio Profilo
+              </Link>
+            )}
+            <button
+              type="button"
+              onClick={() => router.back()}
+              className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-200 text-xs font-bold uppercase rounded-none cursor-pointer"
+            >
+              ← Indietro
+            </button>
+          </div>
+        </div>
+
+        <form onSubmit={handleSave} className="space-y-5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-gray-400 mb-1 font-bold uppercase text-[10px]">
+                Utente
+              </label>
+              <input
+                type="text"
+                disabled={!isSuperAdmin}
+                value={utente}
+                onChange={(e) => setUtente(e.target.value)}
+                className="w-full bg-gray-950 border border-gray-700 px-3 py-2 rounded-none text-white text-xs disabled:opacity-60"
+              />
+            </div>
+
+            <div>
+              <label className="block text-gray-400 mb-1 font-bold uppercase text-[10px]">
+                Email
+              </label>
+              <input
+                type="email"
+                disabled={!isSuperAdmin}
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full bg-gray-950 border border-gray-700 px-3 py-2 rounded-none text-white text-xs disabled:opacity-60"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-gray-400 mb-1 font-bold uppercase text-[10px]">
+                Ruolo
+              </label>
+              <select
+                disabled={!isSuperAdmin}
+                value={ruolo}
+                onChange={(e) => setRuolo(e.target.value)}
+                className="w-full bg-gray-950 border border-gray-700 px-3 py-2 rounded-none text-white text-xs disabled:opacity-60"
+              >
+                <option value="superadmin">superadmin</option>
+                <option value="admin">admin</option>
+                <option value="advisor">advisor</option>
+                <option value="Network Partner">Network Partner</option>
+                <option value="user">user</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-gray-400 mb-1 font-bold uppercase text-[10px]">
+                Stato
+              </label>
+              <select
+                disabled={!isSuperAdmin}
+                value={stato}
+                onChange={(e) => setStato(e.target.value)}
+                className="w-full bg-gray-950 border border-gray-700 px-3 py-2 rounded-none text-white text-xs disabled:opacity-60"
+              >
+                <option value="ATTIVO">ATTIVO</option>
+                <option value="SOSPESO">SOSPESO</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-gray-400 mb-2 font-bold uppercase text-[10px]">
+              Permessi
+            </label>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-gray-950 border border-gray-800 p-3 rounded-none text-xs">
+              {(
+                [
+                  ['aziende', 'Controllo Aziende'],
+                  ['questionari', 'Libreria Questionari'],
+                  ['offerte', 'Catalogo Offerte'],
+                  ['utenti', 'Gestione Utenti'],
+                ] as const
+              ).map(([key, label]) => (
+                <label key={key} className="inline-flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    disabled={!isSuperAdmin}
+                    checked={permessi[key]}
+                    onChange={(e) =>
+                      setPermessi((prev) => ({ ...prev, [key]: e.target.checked }))
+                    }
+                    className="rounded-none"
+                  />
+                  <span>{label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          {extraEntries.length > 0 && (
+            <div className="bg-gray-950 border border-gray-800 rounded-none p-4 space-y-2">
+              <div className="text-[10px] font-mono uppercase text-gray-400 font-bold">
+                Altri Attributi Profilo (gos_profiles)
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs font-mono">
+                {extraEntries.map(([key, val]) => (
+                  <div key={key} className="border border-gray-800/80 p-2">
+                    <span className="text-gray-400">{key}: </span>
+                    <span className="text-gray-200">
+                      {typeof val === 'object' && val !== null
+                        ? JSON.stringify(val)
+                        : String(val ?? '—')}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-4 border-t border-gray-800">
+            {isSuperAdmin ? (
+              <button
+                type="button"
+                disabled={sendingReset}
+                onClick={handlePasswordReset}
+                className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold uppercase rounded-none cursor-pointer"
+              >
+                {sendingReset ? 'Invio reset...' : 'Reset Password'}
+              </button>
             ) : (
-              <span className="text-gray-500 text-[10px] font-mono">NO FOTO</span>
+              <span className="text-[11px] font-mono text-gray-500">
+                Solo i profili superadmin possono modificare dati, permessi o inviare reset password.
+              </span>
+            )}
+
+            {isSuperAdmin && (
+              <button
+                type="submit"
+                disabled={saving}
+                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold uppercase rounded-none cursor-pointer"
+              >
+                {saving ? 'Salvataggio...' : 'Salva Modifiche'}
+              </button>
             )}
           </div>
-          <div className="space-y-2 w-full">
-            <label className="text-xs font-bold text-gray-200 uppercase tracking-wider block">Foto Profilo (Upload)</label>
-            <p className="text-[11px] text-gray-400">Carica un'immagine dal tuo dispositivo (PNG, JPG o WEBP).</p>
-            
-            <div className="flex items-center gap-3">
-              <label className="px-4 py-2 bg-[#1E293B] hover:bg-gray-700 border border-gray-700 text-gray-200 text-xs font-semibold rounded-none transition-all cursor-pointer inline-flex items-center gap-2">
-                {uploadingImage ? 'Caricamento in corso...' : 'Scegli File...'}
-                <input 
-                  type="file" 
-                  accept="image/*" 
-                  onChange={handleFileUpload} 
-                  disabled={uploadingImage}
-                  className="hidden" 
-                />
-              </label>
-              <span className="text-[11px] text-gray-400 truncate max-w-xs font-mono">{avatarUrl}</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Informazioni Personali e Contatti */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pb-6 border-b border-[#1E293B]">
-          
-          <div className="space-y-2">
-            <label className="text-xs font-bold text-gray-300 uppercase tracking-wider">Nome Completo</label>
-            <input
-              type="text"
-              value={fullName}
-              onChange={(e) => setFullName(e.target.value)}
-              className="w-full bg-[#050B14] border border-[#1E293B] px-3.5 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
-              required
-            />
-          </div>
-
-          <div className="space-y-2">
-            <label className="text-xs font-bold text-gray-300 uppercase tracking-wider">Indirizzo Email</label>
-            <input
-              type="email"
-              value={email}
-              disabled
-              className="w-full bg-[#050B14]/50 border border-[#1E293B] px-3.5 py-2 text-xs text-gray-400 cursor-not-allowed"
-            />
-            <span className="text-[10px] text-gray-500 block">L'email di accesso non è modificabile.</span>
-          </div>
-
-          <div className="space-y-2">
-            <label className="text-xs font-bold text-gray-300 uppercase tracking-wider">Numero di Telefono</label>
-            <input
-              type="text"
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              className="w-full bg-[#050B14] border border-[#1E293B] px-3.5 py-2 text-xs text-white focus:outline-none focus:border-emerald-500 font-mono"
-              placeholder="+39 ..."
-            />
-          </div>
-
-          <div className="space-y-2">
-            <label className="text-xs font-bold text-gray-300 uppercase tracking-wider">Ruolo di Sistema</label>
-            <input
-              type="text"
-              value={role}
-              disabled
-              className="w-full bg-[#050B14]/50 border border-[#1E293B] px-3.5 py-2 text-xs text-amber-400 font-bold uppercase cursor-not-allowed"
-            />
-          </div>
-
-          <div className="space-y-2 md:col-span-2">
-            <label className="text-xs font-bold text-gray-300 uppercase tracking-wider">Status Operativo</label>
-            <select
-              value={status}
-              onChange={(e) => setStatus(e.target.value as any)}
-              className="w-full bg-[#050B14] border border-[#1E293B] px-3.5 py-2 text-xs text-white focus:outline-none focus:border-emerald-500 font-medium"
-            >
-              <option value="Active">🟢 Attivo / Operativo</option>
-              <option value="Busy">🔴 Occupato / In Riunione</option>
-              <option value="Away">🟡 Assente / Fuori Sede</option>
-              <option value="Offline">⚪ Offline</option>
-            </select>
-          </div>
-
-        </div>
-
-        {/* Contatto di Emergenza */}
-        <div className="space-y-4 pb-6 border-b border-[#1E293B]">
-          <h3 className="text-xs font-extrabold text-emerald-400 uppercase tracking-wider">Contatto di Emergenza</h3>
-          
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <label className="text-[11px] font-bold text-gray-300 uppercase">Nome Contatto di Emergenza</label>
-              <input
-                type="text"
-                value={emergencyContactName}
-                onChange={(e) => setEmergencyContactName(e.target.value)}
-                className="w-full bg-[#050B14] border border-[#1E293B] px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
-                placeholder="Es. Nome Cognome"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-[11px] font-bold text-gray-300 uppercase">Telefono di Emergenza</label>
-              <input
-                type="text"
-                value={emergencyContactPhone}
-                onChange={(e) => setEmergencyContactPhone(e.target.value)}
-                className="w-full bg-[#050B14] border border-[#1E293B] px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500 font-mono"
-                placeholder="+39 ..."
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* Indirizzo Completo */}
-        <div className="space-y-4">
-          <h3 className="text-xs font-extrabold text-emerald-400 uppercase tracking-wider">Indirizzo Completo</h3>
-          
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="space-y-1.5 md:col-span-2">
-              <label className="text-[11px] font-bold text-gray-300 uppercase">Via / Piazza</label>
-              <input
-                type="text"
-                value={addressStreet}
-                onChange={(e) => setAddressStreet(e.target.value)}
-                className="w-full bg-[#050B14] border border-[#1E293B] px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
-                placeholder="Es. Via Dante Alighieri"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-[11px] font-bold text-gray-300 uppercase">Numero Civico</label>
-              <input
-                type="text"
-                value={addressNumber}
-                onChange={(e) => setAddressNumber(e.target.value)}
-                className="w-full bg-[#050B14] border border-[#1E293B] px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
-                placeholder="Es. 14"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-[11px] font-bold text-gray-300 uppercase">Codice Postale (CAP)</label>
-              <input
-                type="text"
-                value={addressPostalCode}
-                onChange={(e) => setAddressPostalCode(e.target.value)}
-                className="w-full bg-[#050B14] border border-[#1E293B] px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500 font-mono"
-                placeholder="Es. 09128"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-[11px] font-bold text-gray-300 uppercase">Città</label>
-              <input
-                type="text"
-                value={addressCity}
-                onChange={(e) => setAddressCity(e.target.value)}
-                className="w-full bg-[#050B14] border border-[#1E293B] px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
-                placeholder="Es. Cagliari"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-[11px] font-bold text-gray-300 uppercase">Regione</label>
-              <input
-                type="text"
-                value={addressRegion}
-                onChange={(e) => setAddressRegion(e.target.value)}
-                className="w-full bg-[#050B14] border border-[#1E293B] px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
-                placeholder="Es. Sardegna"
-              />
-            </div>
-
-            <div className="space-y-1.5 md:col-span-3">
-              <label className="text-[11px] font-bold text-gray-300 uppercase">Stato</label>
-              <input
-                type="text"
-                value={addressCountry}
-                onChange={(e) => setAddressCountry(e.target.value)}
-                className="w-full bg-[#050B14] border border-[#1E293B] px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
-                placeholder="Es. Italia"
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* Pulsante di Salvataggio */}
-        <div className="flex justify-end pt-4 border-t border-[#1E293B]">
-          <button
-            type="submit"
-            disabled={saving || uploadingImage}
-            className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold uppercase tracking-wider transition-all cursor-pointer disabled:opacity-50"
-          >
-            {saving ? 'Salvataggio in corso...' : 'Salva Modifiche'}
-          </button>
-        </div>
-
-      </form>
-
+        </form>
+      </div>
     </div>
+  );
+}
+
+export default function ProfilePage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-gray-950 text-gray-300 p-8 font-mono text-xs">
+          Caricamento pagina profilo...
+        </div>
+      }
+    >
+      <ProfilePageContent />
+    </Suspense>
   );
 }
