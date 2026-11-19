@@ -4,6 +4,11 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { createBrowserClient } from '@supabase/ssr';
+import {
+  GOS_ROLES,
+  normalizeGosRole,
+  resolveGosPermissions,
+} from '@/utils/gosPermissions';
 
 interface UserDetailViewProps {
   forcedUserId?: string;
@@ -15,7 +20,7 @@ export function UserDetailView({ forcedUserId }: UserDetailViewProps) {
   const targetId = forcedUserId || params?.id || '';
 
   const [profile, setProfile] = useState<any | null>(null);
-  const [actorRole, setActorRole] = useState<string>('user');
+  const [actorRole, setActorRole] = useState<string>('user Guest');
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -23,7 +28,7 @@ export function UserDetailView({ forcedUserId }: UserDetailViewProps) {
 
   const [utente, setUtente] = useState('');
   const [email, setEmail] = useState('');
-  const [ruolo, setRuolo] = useState('user');
+  const [ruolo, setRuolo] = useState<string>('user Guest');
   const [stato, setStato] = useState('ATTIVO');
   const [permessi, setPermessi] = useState({
     aziende: true,
@@ -32,7 +37,13 @@ export function UserDetailView({ forcedUserId }: UserDetailViewProps) {
     utenti: false,
   });
 
-  const isSuperAdmin = actorRole.toLowerCase() === 'superadmin';
+  // Permessi granulari modificabili direttamente dal GOS
+  const [canDeleteAziende, setCanDeleteAziende] = useState(false);
+  const [canEditOfferte, setCanEditOfferte] = useState(false);
+  const [canDeleteOfferte, setCanDeleteOfferte] = useState(false);
+  const [canExportData, setCanExportData] = useState(false);
+
+  const isSuperAdmin = normalizeGosRole(actorRole) === 'superadmin';
 
   const supabase = useMemo(
     () =>
@@ -58,14 +69,26 @@ export function UserDetailView({ forcedUserId }: UserDetailViewProps) {
 
       try {
         const { data: authData } = await supabase.auth.getUser();
-        const authEmail = authData?.user?.email;
-        if (authEmail) {
-          const { data: allProfs } = await supabase.from('gos_profiles').select('*');
-          const me = (allProfs || []).find(
-            (p: any) => (p.email || '').toLowerCase() === authEmail.toLowerCase()
-          );
-          if (me && active) {
-            setActorRole(me.role || me.ruolo || 'user');
+        const authUser = authData?.user;
+        const authEmail = authUser?.email;
+
+        if (authUser) {
+          const { data: meById } = await supabase
+            .from('gos_profiles')
+            .select('ruolo')
+            .eq('id', authUser.id)
+            .maybeSingle();
+
+          if (meById?.ruolo && active) {
+            setActorRole(meById.ruolo);
+          } else if (authEmail) {
+            const { data: allProfs } = await supabase.from('gos_profiles').select('*');
+            const me = (allProfs || []).find(
+              (p: any) => (p.email || '').toLowerCase() === authEmail.toLowerCase()
+            );
+            if (me && active) {
+              setActorRole(me.ruolo || me.role || 'user Guest');
+            }
           }
         }
 
@@ -78,17 +101,41 @@ export function UserDetailView({ forcedUserId }: UserDetailViewProps) {
         const p = json.profile;
         if (!active) return;
 
+        const normalizedRole = normalizeGosRole(p.ruolo || p.role || 'user Guest');
+        const roleDefaults = resolveGosPermissions({ ruolo: normalizedRole });
+
         setProfile(p);
         setUtente(p.full_name || p.nome || '');
         setEmail(p.email || '');
-        setRuolo(p.role || p.ruolo || 'user');
+        setRuolo(normalizedRole);
         setStato(p.stato || p.status || 'ATTIVO');
         setPermessi({
           aziende: p.permessi?.aziende ?? true,
           questionari: p.permessi?.questionari ?? true,
           offerte: p.permessi?.offerte ?? true,
-          utenti: p.permessi?.utenti ?? false,
+          utenti: p.permessi?.utenti ?? normalizedRole === 'superadmin',
         });
+
+        setCanDeleteAziende(
+          typeof p.can_delete_aziende === 'boolean'
+            ? p.can_delete_aziende
+            : roleDefaults.canDeleteAziende
+        );
+        setCanEditOfferte(
+          typeof p.can_edit_offerte === 'boolean'
+            ? p.can_edit_offerte
+            : roleDefaults.canEditOfferte
+        );
+        setCanDeleteOfferte(
+          typeof p.can_delete_offerte === 'boolean'
+            ? p.can_delete_offerte
+            : roleDefaults.canDeleteOfferte
+        );
+        setCanExportData(
+          typeof p.can_export_data === 'boolean'
+            ? p.can_export_data
+            : roleDefaults.canExportData
+        );
       } catch (err: any) {
         if (active) setErrorMsg(err?.message || 'Errore nel caricamento del profilo.');
       } finally {
@@ -102,12 +149,26 @@ export function UserDetailView({ forcedUserId }: UserDetailViewProps) {
     };
   }, [targetId, supabase]);
 
+  const handleRoleChange = (nextRoleRaw: string) => {
+    const nextRole = normalizeGosRole(nextRoleRaw);
+    const defaults = resolveGosPermissions({ ruolo: nextRole });
+    setRuolo(nextRole);
+    setCanDeleteAziende(defaults.canDeleteAziende);
+    setCanEditOfferte(defaults.canEditOfferte);
+    setCanDeleteOfferte(defaults.canDeleteOfferte);
+    setCanExportData(defaults.canExportData);
+    if (nextRole === 'superadmin') {
+      setPermessi((prev) => ({ ...prev, utenti: true }));
+    }
+  };
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!profile || !isSuperAdmin) return;
     setSaving(true);
 
     try {
+      const normalizedRole = normalizeGosRole(ruolo);
       const res = await fetch(`/api/utenti/${encodeURIComponent(profile.id)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -116,9 +177,13 @@ export function UserDetailView({ forcedUserId }: UserDetailViewProps) {
           updates: {
             utente,
             email,
-            ruolo,
+            ruolo: normalizedRole,
             stato,
             permessi,
+            can_delete_aziende: canDeleteAziende,
+            can_edit_offerte: canEditOfferte,
+            can_delete_offerte: canDeleteOfferte,
+            can_export_data: canExportData,
           },
         }),
       });
@@ -126,7 +191,7 @@ export function UserDetailView({ forcedUserId }: UserDetailViewProps) {
       if (!res.ok) throw new Error(json?.error || 'Errore aggiornamento profilo.');
 
       setProfile(json.profile);
-      alert('Profilo salvato su Supabase.');
+      alert('Profilo e permessi salvati su Supabase.');
     } catch (err: any) {
       alert('Errore durante il salvataggio: ' + (err?.message || err));
     } finally {
@@ -186,6 +251,29 @@ export function UserDetailView({ forcedUserId }: UserDetailViewProps) {
       : profile.last_seen_at
       ? Date.now() - new Date(profile.last_seen_at).getTime() <= 5 * 60 * 1000
       : false;
+
+  const granularItems = [
+    {
+      label: 'Eliminare Aziende (can_delete_aziende)',
+      checked: canDeleteAziende,
+      onChange: setCanDeleteAziende,
+    },
+    {
+      label: 'Modificare Offerte (can_edit_offerte)',
+      checked: canEditOfferte,
+      onChange: setCanEditOfferte,
+    },
+    {
+      label: 'Eliminare Offerte (can_delete_offerte)',
+      checked: canDeleteOfferte,
+      onChange: setCanDeleteOfferte,
+    },
+    {
+      label: 'Esportare Dati (can_export_data)',
+      checked: canExportData,
+      onChange: setCanExportData,
+    },
+  ];
 
   return (
     <div className="min-h-screen bg-gray-950 text-white p-6 md:p-10">
@@ -256,14 +344,14 @@ export function UserDetailView({ forcedUserId }: UserDetailViewProps) {
               <select
                 disabled={!isSuperAdmin}
                 value={ruolo}
-                onChange={(e) => setRuolo(e.target.value)}
+                onChange={(e) => handleRoleChange(e.target.value)}
                 className="w-full bg-gray-950 border border-gray-700 px-3 py-2 rounded-none text-white text-xs disabled:opacity-60"
               >
-                <option value="superadmin">superadmin</option>
-                <option value="admin">admin</option>
-                <option value="advisor">advisor</option>
-                <option value="Network Partner">Network Partner</option>
-                <option value="user">user</option>
+                {GOS_ROLES.map((roleOption) => (
+                  <option key={roleOption} value={roleOption}>
+                    {roleOption}
+                  </option>
+                ))}
               </select>
             </div>
 
@@ -285,7 +373,7 @@ export function UserDetailView({ forcedUserId }: UserDetailViewProps) {
 
           <div>
             <label className="block text-gray-400 mb-2 font-bold uppercase text-[10px]">
-              Permessi
+              Permessi Sezioni
             </label>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-gray-950 border border-gray-800 p-3 rounded-none text-xs">
               {(
@@ -307,6 +395,26 @@ export function UserDetailView({ forcedUserId }: UserDetailViewProps) {
                     className="rounded-none"
                   />
                   <span>{label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-gray-400 mb-2 font-bold uppercase text-[10px]">
+              Permessi Operativi (Eliminazione, Offerte, Export)
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-gray-950 border border-gray-800 p-3 rounded-none text-xs">
+              {granularItems.map((item) => (
+                <label key={item.label} className="inline-flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    disabled={!isSuperAdmin}
+                    checked={item.checked}
+                    onChange={(e) => item.onChange(e.target.checked)}
+                    className="rounded-none"
+                  />
+                  <span>{item.label}</span>
                 </label>
               ))}
             </div>

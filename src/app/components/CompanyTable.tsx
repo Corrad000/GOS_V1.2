@@ -3,7 +3,13 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { createBrowserClient } from '@supabase/ssr';
 import AnagraficaForm from './AnagraficaForm';
+import {
+  resolveGosPermissions,
+  type GosUserPermissions,
+  type ProfilePermissionInput,
+} from '@/utils/gosPermissions';
 
 export type CompanyStatusModalita =
   | 'LAVORAZIONE'
@@ -34,6 +40,7 @@ interface CompanyTableProps {
   showRegisterButton?: boolean;
   showImportButton?: boolean;
   fromPath?: string;
+  permissions?: Partial<GosUserPermissions>;
   onCompanyAdded?: () => void;
   onCompaniesDeleted?: (deletedIds: string[]) => void;
 }
@@ -95,6 +102,7 @@ export function CompanyTable({
   showRegisterButton = true,
   showImportButton = true,
   fromPath = 'admin',
+  permissions,
   onCompanyAdded,
   onCompaniesDeleted,
 }: CompanyTableProps) {
@@ -107,6 +115,18 @@ export function CompanyTable({
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [deleteTargets, setDeleteTargets] = useState<CompanyItem[]>([]);
   const [deleting, setDeleting] = useState(false);
+  const [resolvedPerms, setResolvedPerms] = useState<GosUserPermissions>(() =>
+    resolveGosPermissions(null)
+  );
+
+  const supabase = useMemo(
+    () =>
+      createBrowserClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+      ),
+    []
+  );
 
   const sectionRefs = useRef<Record<CompanyStatusModalita, HTMLDivElement | null>>({
     LAVORAZIONE: null,
@@ -116,9 +136,65 @@ export function CompanyTable({
   });
 
   useEffect(() => {
+    let active = true;
+
+    async function loadUserPermissions() {
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+
+        if (!user) {
+          if (active) setResolvedPerms(resolveGosPermissions(null));
+          return;
+        }
+
+        const { data: profile } = await supabase
+          .from('gos_profiles')
+          .select(
+            'ruolo, can_delete_aziende, can_edit_offerte, can_delete_offerte, can_export_data'
+          )
+          .eq('id', user.id)
+          .maybeSingle();
+
+        if (active) {
+          setResolvedPerms(
+            resolveGosPermissions((profile as ProfilePermissionInput | null) || {
+              ruolo: user.user_metadata?.role,
+            })
+          );
+        }
+      } catch {
+        if (active) setResolvedPerms(resolveGosPermissions(null));
+      }
+    }
+
+    loadUserPermissions();
+
+    return () => {
+      active = false;
+    };
+  }, [supabase]);
+
+  const activePermissions: GosUserPermissions = useMemo(
+    () => ({
+      ...resolvedPerms,
+      ...(permissions || {}),
+    }),
+    [resolvedPerms, permissions]
+  );
+
+  useEffect(() => {
     setItems(companies);
     setSelectedIds((prev) => prev.filter((id) => companies.some((c) => c.id === id)));
   }, [companies]);
+
+  useEffect(() => {
+    if (!activePermissions.canDeleteAziende) {
+      setSelectedIds([]);
+      setDeleteTargets([]);
+    }
+  }, [activePermissions.canDeleteAziende]);
 
   const countsByStatus = useMemo(() => {
     const counts: Record<CompanyStatusModalita, number> = {
@@ -183,6 +259,7 @@ export function CompanyTable({
     filteredCompanies.every((c) => selectedIds.includes(c.id));
 
   const toggleSelectAll = () => {
+    if (!activePermissions.canDeleteAziende) return;
     if (allFilteredSelected) {
       const filteredSet = new Set(filteredCompanies.map((c) => c.id));
       setSelectedIds((prev) => prev.filter((id) => !filteredSet.has(id)));
@@ -196,12 +273,14 @@ export function CompanyTable({
   };
 
   const toggleSelectOne = (id: string) => {
+    if (!activePermissions.canDeleteAziende) return;
     setSelectedIds((prev) =>
       prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
     );
   };
 
   const openBulkDeleteModal = () => {
+    if (!activePermissions.canDeleteAziende) return;
     const targets = items.filter((c) => selectedIds.includes(c.id));
     if (targets.length > 0) {
       setDeleteTargets(targets);
@@ -209,15 +288,25 @@ export function CompanyTable({
   };
 
   const handleConfirmDelete = async () => {
-    if (deleteTargets.length === 0) return;
+    if (!activePermissions.canDeleteAziende || deleteTargets.length === 0) return;
     setDeleting(true);
 
     try {
       const idsToDelete = deleteTargets.map((t) => t.id);
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (session?.access_token) {
+        headers.Authorization = `Bearer ${session.access_token}`;
+      }
 
       const response = await fetch('/api/aziende/delete', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ ids: idsToDelete }),
       });
 
@@ -246,7 +335,7 @@ export function CompanyTable({
       setDeleteTargets([]);
       router.refresh();
     } catch (err: any) {
-      alert('Errore durante l\'eliminazione da gos_aziende: ' + (err?.message || err));
+      alert("Errore durante l'eliminazione da gos_aziende: " + (err?.message || err));
     } finally {
       setDeleting(false);
     }
@@ -297,9 +386,12 @@ export function CompanyTable({
     cursor: 'pointer',
   };
 
+  const canRegister = showRegisterButton && activePermissions.canCreateAziende;
+  const canImport = showImportButton && activePermissions.canCreateAziende;
+
   return (
     <div className="bg-gray-900 border border-gray-800 p-6 rounded-none space-y-6 shadow-xl">
-      {isRegistering ? (
+      {isRegistering && activePermissions.canCreateAziende ? (
         <AnagraficaForm
           onSave={(newCompany) => {
             console.log('Azienda registrata in locale:', newCompany);
@@ -320,7 +412,7 @@ export function CompanyTable({
               <p className="text-xs text-gray-400 mt-0.5">{subtitle}</p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              {selectedIds.length > 0 && (
+              {activePermissions.canDeleteAziende && selectedIds.length > 0 && (
                 <button
                   type="button"
                   onClick={openBulkDeleteModal}
@@ -334,7 +426,7 @@ export function CompanyTable({
                   Elimina selezionate ({selectedIds.length})
                 </button>
               )}
-              {showImportButton && (
+              {canImport && (
                 <Link
                   href="/commerciale/importa"
                   style={{
@@ -347,7 +439,7 @@ export function CompanyTable({
                   ↑ Importa Aziende
                 </Link>
               )}
-              {showRegisterButton && (
+              {canRegister && (
                 <button
                   type="button"
                   onClick={() => setIsRegistering(true)}
@@ -499,34 +591,36 @@ export function CompanyTable({
                         <table className="w-full text-left text-xs text-gray-300">
                           <thead className="bg-gray-900 uppercase text-gray-400 font-mono text-[10px] border-b border-gray-800">
                             <tr>
-                              <th className="p-4 w-8">
-                                <input
-                                  type="checkbox"
-                                  checked={
-                                    sectionRows.length > 0 &&
-                                    sectionRows.every((c) => selectedIds.includes(c.id))
-                                  }
-                                  onChange={() => {
-                                    const secIds = sectionRows.map((c) => c.id);
-                                    const allSecSelected = secIds.every((id) =>
-                                      selectedIds.includes(id)
-                                    );
-                                    if (allSecSelected) {
-                                      const secSet = new Set(secIds);
-                                      setSelectedIds((prev) =>
-                                        prev.filter((id) => !secSet.has(id))
-                                      );
-                                    } else {
-                                      setSelectedIds((prev) =>
-                                        Array.from(new Set([...prev, ...secIds]))
-                                      );
+                              {activePermissions.canDeleteAziende && (
+                                <th className="p-4 w-8">
+                                  <input
+                                    type="checkbox"
+                                    checked={
+                                      sectionRows.length > 0 &&
+                                      sectionRows.every((c) => selectedIds.includes(c.id))
                                     }
-                                  }}
-                                  aria-label={`Seleziona tutte le aziende in ${sec.label}`}
-                                  style={checkboxStyle}
-                                  className="rounded-none"
-                                />
-                              </th>
+                                    onChange={() => {
+                                      const secIds = sectionRows.map((c) => c.id);
+                                      const allSecSelected = secIds.every((id) =>
+                                        selectedIds.includes(id)
+                                      );
+                                      if (allSecSelected) {
+                                        const secSet = new Set(secIds);
+                                        setSelectedIds((prev) =>
+                                          prev.filter((id) => !secSet.has(id))
+                                        );
+                                      } else {
+                                        setSelectedIds((prev) =>
+                                          Array.from(new Set([...prev, ...secIds]))
+                                        );
+                                      }
+                                    }}
+                                    aria-label={`Seleziona tutte le aziende in ${sec.label}`}
+                                    style={checkboxStyle}
+                                    className="rounded-none"
+                                  />
+                                </th>
+                              )}
                               <th className="p-4">Azienda / Codice</th>
                               <th className="p-4">Advisor Assegnato</th>
                               <th className="p-4">Fatturato Aziendale</th>
@@ -548,16 +642,18 @@ export function CompanyTable({
                                   key={c.id}
                                   className="hover:bg-gray-850/50 transition-colors"
                                 >
-                                  <td className="p-4">
-                                    <input
-                                      type="checkbox"
-                                      checked={isChecked}
-                                      onChange={() => toggleSelectOne(c.id)}
-                                      aria-label={`Seleziona ${c.ragione_sociale}`}
-                                      style={checkboxStyle}
-                                      className="rounded-none"
-                                    />
-                                  </td>
+                                  {activePermissions.canDeleteAziende && (
+                                    <td className="p-4">
+                                      <input
+                                        type="checkbox"
+                                        checked={isChecked}
+                                        onChange={() => toggleSelectOne(c.id)}
+                                        aria-label={`Seleziona ${c.ragione_sociale}`}
+                                        style={checkboxStyle}
+                                        className="rounded-none"
+                                      />
+                                    </td>
+                                  )}
                                   <td className="p-4">
                                     <div className="font-bold text-white text-sm">
                                       {c.ragione_sociale}
@@ -571,7 +667,7 @@ export function CompanyTable({
                                       {c.advisor_nome || 'Corrado Pinna'}
                                     </div>
                                     <div className="text-[10px] text-gray-400">
-                                      {c.advisor_ruolo || 'Administrator'}
+                                      {c.advisor_ruolo || 'Equity Partner'}
                                     </div>
                                   </td>
                                   <td className="p-4 font-mono font-bold text-emerald-400 text-sm">
@@ -600,18 +696,20 @@ export function CompanyTable({
                                       >
                                         Dettagli
                                       </Link>
-                                      <button
-                                        type="button"
-                                        onClick={() => setDeleteTargets([c])}
-                                        style={{
-                                          ...rowActionStyle,
-                                          backgroundColor: '#dc2626',
-                                          color: '#ffffff',
-                                        }}
-                                        className="hover:opacity-90 transition-all cursor-pointer"
-                                      >
-                                        Elimina
-                                      </button>
+                                      {activePermissions.canDeleteAziende && (
+                                        <button
+                                          type="button"
+                                          onClick={() => setDeleteTargets([c])}
+                                          style={{
+                                            ...rowActionStyle,
+                                            backgroundColor: '#dc2626',
+                                            color: '#ffffff',
+                                          }}
+                                          className="hover:opacity-90 transition-all cursor-pointer"
+                                        >
+                                          Elimina
+                                        </button>
+                                      )}
                                     </div>
                                   </td>
                                 </tr>
@@ -630,7 +728,7 @@ export function CompanyTable({
       )}
 
       {/* ALERT DI CONFERMA ELIMINAZIONE IRREVERSIBILE (SINGOLA O MULTIPLA) */}
-      {deleteTargets.length > 0 && (
+      {activePermissions.canDeleteAziende && deleteTargets.length > 0 && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
           <div className="bg-gray-900 border border-red-600 rounded-none max-w-md w-full p-6 space-y-4 shadow-2xl">
             <div className="space-y-2">

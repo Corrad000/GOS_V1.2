@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { normalizeGosRole } from '@/utils/gosPermissions';
 
 function getServerSupabaseClient() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -16,19 +17,6 @@ function getServerSupabaseClient() {
   return createClient(supabaseUrl, key, {
     auth: { persistSession: false },
   });
-}
-
-function normalizeRoleForDb(inputRole: string): string {
-  const clean = (inputRole || '').trim().toLowerCase();
-  const allowedMap: Record<string, string> = {
-    superadmin: 'superadmin',
-    admin: 'admin',
-    administrator: 'admin',
-    advisor: 'advisor',
-    'network partner': 'Network Partner',
-    user: 'user',
-  };
-  return allowedMap[clean] || 'user';
 }
 
 export async function GET(
@@ -92,7 +80,7 @@ export async function PATCH(
   try {
     const { id } = await context.params;
     const body = await request.json();
-    const actorRole = String(body?.actorRole || '').toLowerCase();
+    const actorRole = normalizeGosRole(String(body?.actorRole || ''));
 
     if (actorRole !== 'superadmin') {
       return NextResponse.json(
@@ -137,12 +125,28 @@ export async function PATCH(
     }
 
     if (typeof updates.ruolo === 'string') {
-      const normalizedRole = normalizeRoleForDb(updates.ruolo);
-      if ('role' in existing || !('ruolo' in existing)) {
+      const normalizedRole = normalizeGosRole(updates.ruolo);
+      if ('ruolo' in existing || !('role' in existing)) {
+        payload.ruolo = normalizedRole;
+      }
+      if ('role' in existing) {
         payload.role = normalizedRole;
       }
-      if ('ruolo' in existing) {
-        payload.ruolo = normalizedRole;
+    }
+
+    const granularKeys = [
+      'can_delete_aziende',
+      'can_edit_offerte',
+      'can_delete_offerte',
+      'can_export_data',
+      'can_delete_progetti',
+      'can_delete_documenti',
+      'can_delete_file',
+    ] as const;
+
+    for (const key of granularKeys) {
+      if (typeof updates[key] === 'boolean' && key in existing) {
+        payload[key] = updates[key];
       }
     }
 

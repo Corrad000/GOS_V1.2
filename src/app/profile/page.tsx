@@ -4,6 +4,11 @@ import React, { useEffect, useState, useMemo, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { createBrowserClient } from '@supabase/ssr';
+import {
+  GOS_ROLES,
+  normalizeGosRole,
+  resolveGosPermissions,
+} from '@/utils/gosPermissions';
 
 function ProfilePageContent() {
   const searchParams = useSearchParams();
@@ -19,7 +24,7 @@ function ProfilePageContent() {
 
   const [utente, setUtente] = useState('');
   const [email, setEmail] = useState('');
-  const [ruolo, setRuolo] = useState('user');
+  const [ruolo, setRuolo] = useState<string>('user Guest');
   const [stato, setStato] = useState('ATTIVO');
   const [permessi, setPermessi] = useState({
     aziende: true,
@@ -27,6 +32,15 @@ function ProfilePageContent() {
     offerte: true,
     utenti: false,
   });
+
+  // Permessi granulari modificabili direttamente dal GOS
+  const [canDeleteAziende, setCanDeleteAziende] = useState(false);
+  const [canEditOfferte, setCanEditOfferte] = useState(false);
+  const [canDeleteOfferte, setCanDeleteOfferte] = useState(false);
+  const [canExportData, setCanExportData] = useState(false);
+  const [canDeleteProgetti, setCanDeleteProgetti] = useState(false);
+  const [canDeleteDocumenti, setCanDeleteDocumenti] = useState(false);
+  const [canDeleteFile, setCanDeleteFile] = useState(false);
 
   const supabase = useMemo(
     () =>
@@ -38,7 +52,7 @@ function ProfilePageContent() {
   );
 
   const actorRole = useMemo(() => {
-    return (loggedInProfile?.role || loggedInProfile?.ruolo || '').toLowerCase();
+    return normalizeGosRole(loggedInProfile?.ruolo || loggedInProfile?.role || '');
   }, [loggedInProfile]);
 
   const isSuperAdmin = actorRole === 'superadmin';
@@ -101,17 +115,58 @@ function ProfilePageContent() {
         }
 
         if (active) {
+          const normalizedRole = normalizeGosRole(
+            targetRow.ruolo || targetRow.role || 'user Guest'
+          );
+          const defaults = resolveGosPermissions({ ruolo: normalizedRole });
+
           setProfile(targetRow);
           setUtente(targetRow.full_name || targetRow.nome || '');
           setEmail(targetRow.email || '');
-          setRuolo(targetRow.role || targetRow.ruolo || 'user');
+          setRuolo(normalizedRole);
           setStato(targetRow.stato || targetRow.status || 'ATTIVO');
           setPermessi({
             aziende: targetRow.permessi?.aziende ?? true,
             questionari: targetRow.permessi?.questionari ?? true,
             offerte: targetRow.permessi?.offerte ?? true,
-            utenti: targetRow.permessi?.utenti ?? false,
+            utenti: targetRow.permessi?.utenti ?? normalizedRole === 'superadmin',
           });
+
+          setCanDeleteAziende(
+            typeof targetRow.can_delete_aziende === 'boolean'
+              ? targetRow.can_delete_aziende
+              : defaults.canDeleteAziende
+          );
+          setCanEditOfferte(
+            typeof targetRow.can_edit_offerte === 'boolean'
+              ? targetRow.can_edit_offerte
+              : defaults.canEditOfferte
+          );
+          setCanDeleteOfferte(
+            typeof targetRow.can_delete_offerte === 'boolean'
+              ? targetRow.can_delete_offerte
+              : defaults.canDeleteOfferte
+          );
+          setCanExportData(
+            typeof targetRow.can_export_data === 'boolean'
+              ? targetRow.can_export_data
+              : defaults.canExportData
+          );
+          setCanDeleteProgetti(
+            typeof targetRow.can_delete_progetti === 'boolean'
+              ? targetRow.can_delete_progetti
+              : defaults.canDeleteProgetti
+          );
+          setCanDeleteDocumenti(
+            typeof targetRow.can_delete_documenti === 'boolean'
+              ? targetRow.can_delete_documenti
+              : defaults.canDeleteDocumenti
+          );
+          setCanDeleteFile(
+            typeof targetRow.can_delete_file === 'boolean'
+              ? targetRow.can_delete_file
+              : defaults.canDeleteFile
+          );
         }
       } catch (err: any) {
         if (active) {
@@ -130,23 +185,47 @@ function ProfilePageContent() {
     };
   }, [targetIdFromQuery, supabase]);
 
+  const handleRoleChange = (nextRoleRaw: string) => {
+    const nextRole = normalizeGosRole(nextRoleRaw);
+    const defaults = resolveGosPermissions({ ruolo: nextRole });
+    setRuolo(nextRole);
+    setCanDeleteAziende(defaults.canDeleteAziende);
+    setCanEditOfferte(defaults.canEditOfferte);
+    setCanDeleteOfferte(defaults.canDeleteOfferte);
+    setCanExportData(defaults.canExportData);
+    setCanDeleteProgetti(defaults.canDeleteProgetti);
+    setCanDeleteDocumenti(defaults.canDeleteDocumenti);
+    setCanDeleteFile(defaults.canDeleteFile);
+    if (nextRole === 'superadmin') {
+      setPermessi((prev) => ({ ...prev, utenti: true }));
+    }
+  };
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!profile || !isSuperAdmin) return;
     setSaving(true);
 
     try {
+      const normalizedRole = normalizeGosRole(ruolo);
       const res = await fetch(`/api/utenti/${encodeURIComponent(profile.id)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          actorRole: loggedInProfile?.role || loggedInProfile?.ruolo || 'user',
+          actorRole: loggedInProfile?.ruolo || loggedInProfile?.role || 'user Guest',
           updates: {
             utente,
             email,
-            ruolo,
+            ruolo: normalizedRole,
             stato,
             permessi,
+            can_delete_aziende: canDeleteAziende,
+            can_edit_offerte: canEditOfferte,
+            can_delete_offerte: canDeleteOfferte,
+            can_export_data: canExportData,
+            can_delete_progetti: canDeleteProgetti,
+            can_delete_documenti: canDeleteDocumenti,
+            can_delete_file: canDeleteFile,
           },
         }),
       });
@@ -156,7 +235,7 @@ function ProfilePageContent() {
       }
 
       setProfile(json.profile);
-      alert('Profilo aggiornato su Supabase.');
+      alert('Profilo e permessi aggiornati su Supabase.');
     } catch (err: any) {
       alert('Errore durante il salvataggio: ' + (err?.message || err));
     } finally {
@@ -174,7 +253,7 @@ function ProfilePageContent() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           email,
-          actorRole: loggedInProfile?.role || loggedInProfile?.ruolo || 'user',
+          actorRole: loggedInProfile?.ruolo || loggedInProfile?.role || 'user Guest',
         }),
       });
       const json = await res.json();
@@ -227,6 +306,44 @@ function ProfilePageContent() {
         profile.email &&
         loggedInProfile.email.toLowerCase() === profile.email.toLowerCase()));
 
+  const granularPermissions = [
+    {
+      label: 'Eliminare Aziende (can_delete_aziende)',
+      checked: canDeleteAziende,
+      onChange: setCanDeleteAziende,
+    },
+    {
+      label: 'Modificare Offerte (can_edit_offerte)',
+      checked: canEditOfferte,
+      onChange: setCanEditOfferte,
+    },
+    {
+      label: 'Eliminare Offerte (can_delete_offerte)',
+      checked: canDeleteOfferte,
+      onChange: setCanDeleteOfferte,
+    },
+    {
+      label: 'Esportare Dati (can_export_data)',
+      checked: canExportData,
+      onChange: setCanExportData,
+    },
+    {
+      label: 'Eliminare Progetti (can_delete_progetti)',
+      checked: canDeleteProgetti,
+      onChange: setCanDeleteProgetti,
+    },
+    {
+      label: 'Eliminare Documenti (can_delete_documenti)',
+      checked: canDeleteDocumenti,
+      onChange: setCanDeleteDocumenti,
+    },
+    {
+      label: 'Eliminare File (can_delete_file)',
+      checked: canDeleteFile,
+      onChange: setCanDeleteFile,
+    },
+  ];
+
   const extraEntries = Object.entries(profile).filter(
     ([key]) =>
       ![
@@ -242,6 +359,13 @@ function ProfilePageContent() {
         'permessi',
         'is_online',
         'last_seen_at',
+        'can_delete_aziende',
+        'can_edit_offerte',
+        'can_delete_offerte',
+        'can_export_data',
+        'can_delete_progetti',
+        'can_delete_documenti',
+        'can_delete_file',
       ].includes(key)
   );
 
@@ -334,14 +458,14 @@ function ProfilePageContent() {
               <select
                 disabled={!isSuperAdmin}
                 value={ruolo}
-                onChange={(e) => setRuolo(e.target.value)}
+                onChange={(e) => handleRoleChange(e.target.value)}
                 className="w-full bg-gray-950 border border-gray-700 px-3 py-2 rounded-none text-white text-xs disabled:opacity-60"
               >
-                <option value="superadmin">superadmin</option>
-                <option value="admin">admin</option>
-                <option value="advisor">advisor</option>
-                <option value="Network Partner">Network Partner</option>
-                <option value="user">user</option>
+                {GOS_ROLES.map((roleOption) => (
+                  <option key={roleOption} value={roleOption}>
+                    {roleOption}
+                  </option>
+                ))}
               </select>
             </div>
 
@@ -363,7 +487,7 @@ function ProfilePageContent() {
 
           <div>
             <label className="block text-gray-400 mb-2 font-bold uppercase text-[10px]">
-              Permessi
+              Permessi Sezioni
             </label>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-gray-950 border border-gray-800 p-3 rounded-none text-xs">
               {(
@@ -385,6 +509,26 @@ function ProfilePageContent() {
                     className="rounded-none"
                   />
                   <span>{label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-gray-400 mb-2 font-bold uppercase text-[10px]">
+              Permessi Operativi (Eliminazione, Offerte, Export, Progetti, Documenti, File)
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-gray-950 border border-gray-800 p-3 rounded-none text-xs">
+              {granularPermissions.map((item) => (
+                <label key={item.label} className="inline-flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    disabled={!isSuperAdmin}
+                    checked={item.checked}
+                    onChange={(e) => item.onChange(e.target.checked)}
+                    className="rounded-none"
+                  />
+                  <span>{item.label}</span>
                 </label>
               ))}
             </div>
