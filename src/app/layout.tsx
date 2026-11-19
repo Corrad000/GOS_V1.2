@@ -22,13 +22,25 @@ function NavigationHeader() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
 
+  const isShareRoute = pathname?.startsWith('/share');
+
   useEffect(() => {
     setMounted(true);
     setCurrentDate(new Date().toLocaleDateString('it-IT'));
-    setLoginTime(new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+    setLoginTime(
+      new Date().toLocaleTimeString('it-IT', {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      })
+    );
+
+    if (isShareRoute) return;
 
     async function getSessionUser() {
-      const { data: { session } } = await supabase.auth.getSession();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
       if (session?.user) {
         setUserEmail(session.user.email || 'Utente');
         if (session.user.user_metadata?.role) {
@@ -40,19 +52,25 @@ function NavigationHeader() {
     getSessionUser();
 
     const timer = setInterval(() => {
-      setSessionDuration(prev => {
+      setSessionDuration((prev) => {
         const parts = prev.split(':').map(Number);
         let s = parts[2] + 1;
         let m = parts[1];
         let h = parts[0];
-        if (s >= 60) { s = 0; m++; }
-        if (m >= 60) { m = 0; h++; }
+        if (s >= 60) {
+          s = 0;
+          m++;
+        }
+        if (m >= 60) {
+          m = 0;
+          h++;
+        }
         return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
       });
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [supabase]);
+  }, [supabase, isShareRoute]);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -60,13 +78,12 @@ function NavigationHeader() {
     router.refresh();
   };
 
-  // Se siamo nella pagina di login (radice '/'), non mostriamo la TopBar
-  if (pathname === '/') return null;
+  // Nasconde la TopBar nella radice ('/') e sulle rotte condivise esterne ('/share/...')
+  if (pathname === '/' || isShareRoute) return null;
 
   return (
     <header className="bg-[#050B14] border-b border-[#1E293B] w-full shrink-0 flex justify-center">
       <div className="max-w-7xl w-full mx-auto px-6 md:px-8 py-4 flex flex-col md:flex-row justify-between items-center gap-4">
-        
         {/* Logo ufficiale collegato alla Dashboard */}
         <div className="flex items-center gap-3">
           <Link href="/dashboard" className="flex items-center gap-3 group cursor-pointer">
@@ -100,7 +117,9 @@ function NavigationHeader() {
           <div className="hidden lg:flex items-center gap-4 text-gray-300 text-[11px]">
             <span>{mounted ? currentDate : ''}</span>
             <span>Login: {loginTime}</span>
-            <span className="text-amber-400 font-bold">Durata: {mounted ? sessionDuration : '00:00:00'}</span>
+            <span className="text-amber-400 font-bold">
+              Durata: {mounted ? sessionDuration : '00:00:00'}
+            </span>
           </div>
 
           <div className="flex items-center gap-2 border-l border-gray-800 pl-4">
@@ -118,9 +137,40 @@ function NavigationHeader() {
             </button>
           </div>
         </div>
-
       </div>
     </header>
+  );
+}
+
+function LayoutShell({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  const isShareRoute = pathname?.startsWith('/share');
+
+  if (isShareRoute) {
+    return <>{children}</>;
+  }
+
+  return (
+    <>
+      <Suspense fallback={<div className="h-16 bg-[#050B14] w-full" />}>
+        <NavigationHeader />
+      </Suspense>
+
+      <main className="flex-1 max-w-7xl w-full mx-auto px-6 md:px-8 py-6 md:py-8 flex flex-col justify-center">
+        {children}
+      </main>
+
+      <footer className="bg-[#0F172A] text-gray-300 py-4 w-full text-xs mt-auto border-t border-[#1E293B] shadow-inner shrink-0 flex justify-center">
+        <div className="max-w-7xl w-full mx-auto px-6 md:px-8 flex flex-col md:flex-row justify-between items-center gap-2 text-center md:text-left">
+          <div>
+            <span className="font-extrabold text-white">GOS 1.2</span> — Strategic &amp; Operation Advisors Infrastructure
+          </div>
+          <div className="text-gray-400">
+            Glaring LLP © 2026 — Tutti i diritti riservati
+          </div>
+        </div>
+      </footer>
+    </>
   );
 }
 
@@ -131,30 +181,13 @@ export default function RootLayout({
 }) {
   return (
     <html lang="it" suppressHydrationWarning>
-      <body suppressHydrationWarning className="bg-[#050B14] text-white antialiased min-h-screen flex flex-col items-center selection:bg-orange-600 selection:text-white">
-        
-        {/* Avvolgiamo in Suspense per soddisfare il requisito di Next.js per usePathname */}
-        <Suspense fallback={<div className="h-16 bg-[#050B14] w-full" />}>
-          <NavigationHeader />
+      <body
+        suppressHydrationWarning
+        className="bg-[#050B14] text-white antialiased min-h-screen flex flex-col items-center selection:bg-orange-600 selection:text-white"
+      >
+        <Suspense fallback={children}>
+          <LayoutShell>{children}</LayoutShell>
         </Suspense>
-
-        {/* CONTENUTO PRINCIPALE */}
-        <main className="flex-1 max-w-7xl w-full mx-auto px-6 md:px-8 py-6 md:py-8 flex flex-col justify-center">
-          {children}
-        </main>
-
-        {/* FOOTER */}
-        <footer className="bg-[#0F172A] text-gray-300 py-4 w-full text-xs mt-auto border-t border-[#1E293B] shadow-inner shrink-0 flex justify-center">
-          <div className="max-w-7xl w-full mx-auto px-6 md:px-8 flex flex-col md:flex-row justify-between items-center gap-2 text-center md:text-left">
-            <div>
-              <span className="font-extrabold text-white">GOS 1.2</span> — Strategic & Operation Advisors Infrastructure
-            </div>
-            <div className="text-gray-400">
-              Glaring LLP © 2026 — Tutti i diritti riservati
-            </div>
-          </div>
-        </footer>
-
       </body>
     </html>
   );

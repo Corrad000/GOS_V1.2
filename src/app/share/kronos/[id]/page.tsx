@@ -172,7 +172,7 @@ export default function PublicClientKronosPage() {
   return (
     <main
       onClick={() => setSelectedNote(null)}
-      className="min-h-screen bg-[#15191f] text-[#e8ecf2] font-sans p-4 sm:p-8"
+      className="fixed inset-0 z-50 overflow-auto bg-[#15191f] text-[#e8ecf2] font-sans p-4 sm:p-8"
     >
       <div className="max-w-[1600px] mx-auto space-y-5 bg-[#15191f] border border-[#2a313c] p-6 rounded-3xl shadow-xl">
         {/* INTESTAZIONE PULITA */}
