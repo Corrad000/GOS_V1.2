@@ -17,5 +17,8 @@ export function getSupabaseBrowserClient() {
   return supabaseInstance;
 }
 
-// Istanza esportata direttamente per un utilizzo immediato nei componenti
+export function createClient() {
+  return getSupabaseBrowserClient();
+}
+
 export const supabase = getSupabaseBrowserClient();

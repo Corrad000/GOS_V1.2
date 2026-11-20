@@ -9,6 +9,7 @@ import {
   normalizeGosRole,
   resolveGosPermissions,
 } from '@/utils/gosPermissions';
+import { RiepilogoKanbanDash } from './RiepilogoKanbanDash';
 
 interface UserDetailViewProps {
   forcedUserId?: string;
@@ -276,8 +277,8 @@ export function UserDetailView({ forcedUserId }: UserDetailViewProps) {
   ];
 
   return (
-    <div className="min-h-screen bg-gray-950 text-white p-6 md:p-10">
-      <div className="max-w-4xl mx-auto bg-gray-900 border border-gray-800 rounded-none p-6 space-y-6 shadow-xl">
+    <div className="min-h-screen bg-gray-950 text-white p-6 md:p-10 space-y-8">
+      <div className="max-w-6xl mx-auto bg-gray-900 border border-gray-800 rounded-none p-6 space-y-6 shadow-xl">
         <div className="flex flex-wrap items-start justify-between gap-4 border-b border-gray-800 pb-4">
           <div>
             <div className="text-[11px] font-mono text-amber-400 uppercase">
@@ -448,6 +449,14 @@ export function UserDetailView({ forcedUserId }: UserDetailViewProps) {
           </div>
         </form>
       </div>
+
+      {/* Aggregazione card di tutte le trattative nella dashboard user */}
+      <div className="max-w-6xl mx-auto">
+        <RiepilogoKanbanDash
+          userId={profile.id}
+          advisorName={utente || email || profile.id}
+        />
+      </div>
     </div>
   );
 }
@@ -455,3 +464,4 @@ export function UserDetailView({ forcedUserId }: UserDetailViewProps) {
 export default function UtenteDettaglioPage() {
   return <UserDetailView />;
 }
+

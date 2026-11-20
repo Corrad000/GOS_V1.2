@@ -1,30 +1,51 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useRouter, useParams } from 'next/navigation';
+import { Suspense, useState, useEffect } from 'react';
+import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import { supabase } from '@/services/supabase/client';
 import AnagraficaForm from '../../components/AnagraficaForm';
 import { AnagraficaView } from '../../components/AnagraficaView';
 import { OfferBuilderView } from '@/modules/offer-builder/OfferBuilderView';
 import { ModulePickerModal } from '@/modules/offer-builder/ModulePickerModal';
 import { OfferPreviewView } from '@/modules/offer-builder/OfferPreviewView';
+import {
+  SchedaTrattativa,
+  normalizzaFase,
+  normalizzaStato,
+  type EventoTimeline,
+  type VoceRegistro,
+  type FaseTrattativa,
+  type StatoTrattativa,
+} from '@/modules/offer-builder/TrattativaSchedaView';
 import { generateGlobalActivityCode } from '@/utils/codeGenerator';
 
-// Import del componente documenti pulito e centralizzato
 import { DocumentsView } from '@/modules/project-management/DocumentsView';
 
 import { QuestionnaireBuilderView } from '@/modules/questionnaire-builder/QuestionnaireBuilderView';
 import { QuestionnaireComposerView } from '@/modules/questionnaire-builder/QuestionnaireComposerView';
 import { QuestionnairePreviewView } from '@/modules/questionnaire-builder/QuestionnairePreviewView';
 
-export default function CompanyPage() {
+const PROBABILITA_PER_FASE: Record<FaseTrattativa, number> = {
+  lead: 0.2,
+  qualifica: 0.4,
+  proposta: 0.6,
+  negoziazione: 0.8,
+  chiusura: 1.0,
+};
+
+function CompanyPageContent() {
   const router = useRouter();
   const params = useParams();
+  const searchParams = useSearchParams();
   const companyId = params?.id as string;
+  const queryTab = searchParams?.get('tab');
+  const queryTrattativaId = searchParams?.get('trattativa');
 
-  const [activeTab, setActiveTab] = useState<'anagrafica' | 'questionari' | 'business' | 'offer-builder' | 'documenti'>('anagrafica');
+  const [activeTab, setActiveTab] = useState<'anagrafica' | 'questionari' | 'business' | 'offer-builder' | 'trattative' | 'documenti'>(
+    queryTab === 'trattative' ? 'trattative' : 'anagrafica'
+  );
   const [loadingCompany, setLoadingCompany] = useState(true);
-  
+
   const [companyData, setCompanyData] = useState({
     id: '',
     ragione_sociale: 'Caricamento in corso...',
@@ -71,11 +92,64 @@ export default function CompanyPage() {
   const [selectedCompanyModules, setSelectedCompanyModules] = useState<any[]>([]);
   const [showOfferPreview, setShowOfferPreview] = useState(false);
 
+  const [trattativeList, setTrattativeList] = useState<any[]>([]);
+  const [loadingTrattative, setLoadingTrattative] = useState(false);
+  const [trattativeFiltro, setTrattativeFiltro] = useState<'tutte' | 'aperte' | 'chiuse'>('tutte');
+  const [activeTrattativa, setActiveTrattativa] = useState<any>(null);
+  const [trattativaTimelineMap, setTrattativaTimelineMap] = useState<Record<string, EventoTimeline[]>>({});
+  const [trattativaRegistroMap, setTrattativaRegistroMap] = useState<Record<string, VoceRegistro[]>>({});
+
+  const [showCreateTrattativaModal, setShowCreateTrattativaModal] = useState(false);
+  const [trattativaTitolo, setTrattativaTitolo] = useState('');
+  const [trattativaDescrizione, setTrattativaDescrizione] = useState('');
+  const [trattativaFase, setTrattativaFase] = useState<FaseTrattativa>('lead');
+  const [trattativaValore, setTrattativaValore] = useState('0');
+  const [trattativaProbabilita, setTrattativaProbabilita] = useState('20');
+  const [trattativaChiusuraPrevista, setTrattativaChiusuraPrevista] = useState('');
+  const [trattativaProssimaAzione, setTrattativaProssimaAzione] = useState('');
+  const [trattativaCodiceOfferta, setTrattativaCodiceOfferta] = useState('');
+  const [isSubmittingTrattativa, setIsSubmittingTrattativa] = useState(false);
+
+  useEffect(() => {
+    if (queryTab === 'trattative') {
+      setActiveTab('trattative');
+    }
+  }, [queryTab]);
+
   const handleRemoveCompanyModule = (moduleId: string) => {
     setSelectedCompanyModules(prev => prev.filter(m => m.id !== moduleId));
   };
 
-  // 1. Fetch Dettagli Azienda
+  async function fetchOffersForCompany(targetId: string, targetCode: string) {
+    setLoadingOffers(true);
+    try {
+      const codeFilter = targetCode || targetId;
+      if (!codeFilter) {
+        setOffersList([]);
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from('gos_offerte')
+        .select('*')
+        .eq('company_code', codeFilter)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Errore lettura gos_offerte:', error);
+        setOffersList([]);
+        return;
+      }
+
+      setOffersList(data || []);
+    } catch (err) {
+      console.error('Eccezione lettura gos_offerte:', err);
+      setOffersList([]);
+    } finally {
+      setLoadingOffers(false);
+    }
+  }
+
   useEffect(() => {
     if (!companyId) return;
 
@@ -123,8 +197,8 @@ export default function CompanyPage() {
   }, [companyId]);
 
   const companyCode = companyData.codice_azienda;
+  const resolvedCompanyId = companyData.id || companyId;
 
-  // 2. Fetch Progetti Business Plan
   useEffect(() => {
     if (activeTab !== 'business' || !companyCode) return;
 
@@ -148,29 +222,73 @@ export default function CompanyPage() {
     loadProgetti();
   }, [activeTab, companyCode]);
 
-  // 3. Fetch Offerte Commerciali
   useEffect(() => {
-    if (activeTab !== 'offer-builder' || !companyCode) return;
+    if (
+      activeTab !== 'offer-builder' &&
+      activeTab !== 'trattative' &&
+      !showCreateTrattativaModal
+    ) {
+      return;
+    }
+    if (!resolvedCompanyId && !companyCode) return;
 
-    async function loadOfferte() {
-      setLoadingOffers(true);
+    void fetchOffersForCompany(resolvedCompanyId, companyCode);
+  }, [activeTab, resolvedCompanyId, companyCode, showCreateTrattativaModal]);
+
+  useEffect(() => {
+    if (activeTab !== 'trattative' || !resolvedCompanyId) return;
+
+    async function loadTrattative() {
+      setLoadingTrattative(true);
       try {
         const { data, error } = await supabase
-          .from('gos_offerte')
+          .from('gos_trattative')
           .select('*')
-          .eq('company_code', companyCode);
+          .eq('azienda_id', resolvedCompanyId)
+          .order('created_at', { ascending: false });
 
         if (error) throw error;
-        setOffersList(data || []);
+        const rows = data || [];
+        setTrattativeList(rows);
+
+        if (queryTrattativaId) {
+          const found = rows.find((t: any) => String(t.id) === String(queryTrattativaId));
+          if (found) {
+            setActiveTrattativa(found);
+          }
+        }
       } catch (err) {
-        setOffersList([]);
+        setTrattativeList([]);
       } finally {
-        setLoadingOffers(false);
+        setLoadingTrattative(false);
       }
     }
 
-    loadOfferte();
-  }, [activeTab, companyCode]);
+    loadTrattative();
+  }, [activeTab, resolvedCompanyId, queryTrattativaId]);
+
+  const appendRegistro = (trattativaId: string, voce: VoceRegistro) => {
+    setTrattativaRegistroMap(prev => ({
+      ...prev,
+      [trattativaId]: [voce, ...(prev[trattativaId] || [])],
+    }));
+  };
+
+  const appendTimeline = (trattativaId: string, evento: EventoTimeline) => {
+    setTrattativaTimelineMap(prev => ({
+      ...prev,
+      [trattativaId]: [evento, ...(prev[trattativaId] || [])],
+    }));
+  };
+
+  const syncTrattativaLocal = (trattativaId: string, patch: Record<string, any>) => {
+    setTrattativeList(prev =>
+      prev.map(item => (item.id === trattativaId ? { ...item, ...patch } : item))
+    );
+    setActiveTrattativa((prev: any) =>
+      prev && prev.id === trattativaId ? { ...prev, ...patch } : prev
+    );
+  };
 
   const handleCreateBusinessPlan = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -204,7 +322,7 @@ export default function CompanyPage() {
       setBpDescription('');
       setBpStato('Bozza');
       setShowCreateBpModal(false);
-      
+
       router.push(`/progetti/${created.id}`);
     } catch (err: any) {
       alert('Errore Supabase: ' + (err.message || 'Impossibile registrare il progetto.'));
@@ -219,16 +337,16 @@ export default function CompanyPage() {
 
     setIsSubmittingOffer(true);
     try {
-      const codiceOfferta = await generateGlobalActivityCode(companyCode, 'OFF');
+      const targetCompanyCode = companyCode || resolvedCompanyId;
+      const codiceOfferta = await generateGlobalActivityCode(targetCompanyCode, 'OFF');
 
       const newOfferPayload = {
-        company_code: companyCode,
+        company_code: targetCompanyCode,
         codice_offerta: codiceOfferta,
-        titolo: offerTitle,
-        descrizione: offerDescription,
+        titolo: offerTitle.trim(),
+        descrizione: offerDescription.trim() || null,
         stato: 'Bozza',
-        moduli: [],
-        created_at: new Date().toISOString()
+        moduli: []
       };
 
       const { data, error } = await supabase
@@ -237,28 +355,339 @@ export default function CompanyPage() {
         .select()
         .single();
 
-      if (error) throw error;
+      if (error) {
+        console.error('Errore INSERT gos_offerte:', error);
+        throw new Error(error.message);
+      }
 
-      const created = data || { id: Date.now().toString(), ...newOfferPayload };
-      setOffersList(prev => [...prev, created]);
+      const created = data;
+      setOffersList(prev => [created, ...prev]);
 
       setOfferTitle('');
       setOfferDescription('');
       setShowCreateOfferModal(false);
-      
+
       setActiveOffer(created);
-      setSelectedCompanyModules(created.moduli || []);
+      setSelectedCompanyModules(Array.isArray(created.moduli) ? created.moduli : []);
     } catch (err: any) {
-      alert('Errore nella creazione dell\'offerta: ' + (err.message || err));
+      alert('Errore nella creazione dell\'offerta: ' + (err?.message || err));
     } finally {
       setIsSubmittingOffer(false);
     }
   };
 
+  const handleSaveOfferModules = async (mods: any[]) => {
+    if (!activeOffer?.id) return;
+    try {
+      const { data, error } = await supabase
+        .from('gos_offerte')
+        .update({ moduli: mods })
+        .eq('id', activeOffer.id)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      if (data) {
+        setActiveOffer(data);
+        setSelectedCompanyModules(Array.isArray(data.moduli) ? data.moduli : mods);
+        setOffersList(prev => prev.map(o => (o.id === data.id ? data : o)));
+        alert('Moduli salvati su Supabase!');
+      }
+    } catch (err: any) {
+      alert('Errore salvataggio moduli offerta: ' + (err.message || err));
+    }
+  };
+
+  const handleCreateTrattativa = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!trattativaTitolo.trim()) return;
+
+    setIsSubmittingTrattativa(true);
+    try {
+      const codiceTrattativa = await generateGlobalActivityCode(companyCode || resolvedCompanyId, 'TRT');
+      const probDecimal = Math.min(1, Math.max(0, (Number(trattativaProbabilita) || 0) / 100));
+
+      const newTrattativaPayload = {
+        azienda_id: resolvedCompanyId,
+        codice_trattativa: codiceTrattativa,
+        titolo: trattativaTitolo.trim(),
+        fase: trattativaFase,
+        stato_trattativa: 'attiva',
+        probabilita: probDecimal,
+        valore: Number(trattativaValore) || 0,
+        codice_offerta: trattativaCodiceOfferta.trim() || null,
+        chiusura_prevista: trattativaChiusuraPrevista ? new Date(trattativaChiusuraPrevista).toISOString() : null,
+        azione_necessaria: trattativaProssimaAzione.trim() || 'Definire primo contatto o follow-up',
+        referente_nome: companyData.referente || null,
+        advisor_nome: companyData.advisor_nome || 'Corrado Pinna',
+        note: trattativaDescrizione.trim() || null,
+        created_at: new Date().toISOString(),
+      };
+
+      const { data, error } = await supabase
+        .from('gos_trattative')
+        .insert([newTrattativaPayload])
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      const created = data || { id: Date.now().toString(), ...newTrattativaPayload };
+      setTrattativeList(prev => [created, ...prev]);
+
+      setTrattativaTitolo('');
+      setTrattativaDescrizione('');
+      setTrattativaFase('lead');
+      setTrattativaValore('0');
+      setTrattativaProbabilita('20');
+      setTrattativaChiusuraPrevista('');
+      setTrattativaProssimaAzione('');
+      setTrattativaCodiceOfferta('');
+      setShowCreateTrattativaModal(false);
+      setActiveTrattativa(created);
+    } catch (err: any) {
+      alert('Errore nella creazione della trattativa: ' + (err.message || err));
+    } finally {
+      setIsSubmittingTrattativa(false);
+    }
+  };
+
+  const filteredTrattative = trattativeList.filter((t) => {
+    const st = normalizzaStato(t.stato_trattativa);
+    if (trattativeFiltro === 'aperte') return st === 'attiva' || st === 'in_pausa';
+    if (trattativeFiltro === 'chiuse') return st === 'vinta' || st === 'persa';
+    return true;
+  });
+
+  const offerteCollegateScheda = offersList.map((off) => {
+    const moduliArr = Array.isArray(off.moduli) ? off.moduli : [];
+    const importoCalcolato =
+      Number(off.importo ?? off.totale ?? off.valore ?? 0) ||
+      moduliArr.reduce((acc: number, m: any) => acc + Number(m?.prezzo ?? m?.importo ?? m?.fee ?? 0), 0);
+
+    const statoRaw = String(off.stato || 'bozza').toLowerCase();
+    const statoMappato: 'inviata' | 'bozza' | 'archiviata' | 'in_approvazione' =
+      statoRaw.includes('inviat')
+        ? 'inviata'
+        : statoRaw.includes('archiv')
+          ? 'archiviata'
+          : statoRaw.includes('approvaz')
+            ? 'in_approvazione'
+            : 'bozza';
+
+    return {
+      codice: off.codice_offerta || off.codice || 'OFF',
+      versione: Number(off.versione || 1),
+      importo: importoCalcolato,
+      stato: statoMappato,
+      inviataIl: off.created_at || undefined,
+    };
+  });
+
+  const buildDatiScheda = (t: any) => {
+    const registroIniziale: VoceRegistro[] = trattativaRegistroMap[t.id] || [
+      {
+        id: `reg-${t.id}`,
+        quando: t.created_at || new Date().toISOString(),
+        autore: t.advisor_nome || companyData.advisor_nome || 'Sistema GOS',
+        azione: 'Creazione trattativa',
+        daStato: '-',
+        aStato: `${normalizzaFase(t.fase)} / ${normalizzaStato(t.stato_trattativa)}`,
+        motivo: t.codice_trattativa || undefined,
+      },
+    ];
+
+    return {
+      trattativa: {
+        id: t.id,
+        nome: t.titolo,
+        azienda: {
+          id: resolvedCompanyId,
+          nome: companyData.ragione_sociale,
+        },
+        codiceOfferta: t.codice_offerta || undefined,
+        valore: Number(t.valore || 0),
+        azioneNecessaria: t.azione_necessaria || 'Nessuna azione da fare',
+        azioneProgrammata:
+          t.azione_programmata_data && t.azione_programmata_titolo
+            ? {
+                titolo: t.azione_programmata_titolo,
+                data: t.azione_programmata_data,
+              }
+            : null,
+        statoAzione: (t.azione_programmata_data ? 'programmata' : 'senza_azione') as 'scaduta' | 'oggi' | 'programmata' | 'senza_azione',
+        ultimaModifica: t.ultima_modifica || t.created_at || new Date().toISOString(),
+        fase: normalizzaFase(t.fase),
+        statoTrattativa: normalizzaStato(t.stato_trattativa),
+        probabilita: Number(t.probabilita ?? PROBABILITA_PER_FASE[normalizzaFase(t.fase)] ?? 0.2),
+        chiusuraPrevista: t.chiusura_prevista || undefined,
+      },
+      moduli: [],
+      timeline: trattativaTimelineMap[t.id] || [],
+      registro: registroIniziale,
+      offerte: offerteCollegateScheda,
+      contatti: t.referente_nome
+        ? [{ nome: t.referente_nome, ruolo: 'Referente' }]
+        : companyData.referente
+          ? [{ nome: companyData.referente, ruolo: 'Referente' }]
+          : [],
+    };
+  };
+
+  const handleChangeTrattativaStato = async (
+    trattativaId: string,
+    nuovoStato: StatoTrattativa
+  ) => {
+    const precedente = normalizzaStato(activeTrattativa?.stato_trattativa);
+    const nowIso = new Date().toISOString();
+
+    syncTrattativaLocal(trattativaId, {
+      stato_trattativa: nuovoStato,
+      ultima_modifica: nowIso,
+    });
+    appendRegistro(trattativaId, {
+      id: `reg-stato-${Date.now()}`,
+      quando: nowIso,
+      autore: companyData.advisor_nome || 'Advisor',
+      azione: 'Cambio stato trattativa',
+      daStato: precedente,
+      aStato: nuovoStato,
+    });
+
+    await supabase
+      .from('gos_trattative')
+      .update({ stato_trattativa: nuovoStato, ultima_modifica: nowIso })
+      .eq('id', trattativaId);
+  };
+
+  const handleChangeTrattativaFase = async (
+    trattativaId: string,
+    nuovaFase: FaseTrattativa
+  ) => {
+    const precedente = normalizzaFase(activeTrattativa?.fase);
+    const nuovaProb = PROBABILITA_PER_FASE[nuovaFase] ?? 0.2;
+    const nowIso = new Date().toISOString();
+
+    syncTrattativaLocal(trattativaId, {
+      fase: nuovaFase,
+      probabilita: nuovaProb,
+      ultima_modifica: nowIso,
+    });
+    appendRegistro(trattativaId, {
+      id: `reg-fase-${Date.now()}`,
+      quando: nowIso,
+      autore: companyData.advisor_nome || 'Advisor',
+      azione: 'Avanzamento fase pipeline',
+      daStato: precedente,
+      aStato: nuovaFase,
+    });
+
+    await supabase
+      .from('gos_trattative')
+      .update({ fase: nuovaFase, probabilita: nuovaProb, ultima_modifica: nowIso })
+      .eq('id', trattativaId);
+  };
+
+  const handleRegistraAttivitaTrattativa = async (
+    trattativaId: string,
+    payload: {
+      tipo: EventoTimeline['tipo'];
+      titolo: string;
+      dettaglio?: string;
+      prossimaAzione?: string;
+    }
+  ) => {
+    const nowIso = new Date().toISOString();
+    appendTimeline(trattativaId, {
+      id: `ev-${Date.now()}`,
+      quando: nowIso,
+      tipo: payload.tipo,
+      titolo: payload.titolo,
+      dettaglio: payload.dettaglio,
+      autore: companyData.advisor_nome || 'Advisor',
+    });
+
+    const patch: Record<string, any> = { ultima_modifica: nowIso };
+    if (payload.prossimaAzione) {
+      patch.azione_necessaria = payload.prossimaAzione;
+      patch.azione_programmata_titolo = null;
+      patch.azione_programmata_data = null;
+    }
+    syncTrattativaLocal(trattativaId, patch);
+
+    if (payload.prossimaAzione) {
+      await supabase
+        .from('gos_trattative')
+        .update({ azione_necessaria: payload.prossimaAzione, ultima_modifica: nowIso })
+        .eq('id', trattativaId);
+    }
+  };
+
+  const handleProgrammaFollowUpTrattativa = async (
+    trattativaId: string,
+    payload: { titolo: string; data: string }
+  ) => {
+    const nowIso = new Date().toISOString();
+    const patch = {
+      azione_programmata_titolo: payload.titolo,
+      azione_programmata_data: payload.data,
+      azione_necessaria: payload.titolo,
+      ultima_modifica: nowIso,
+    };
+
+    syncTrattativaLocal(trattativaId, patch);
+
+    appendTimeline(trattativaId, {
+      id: `ev-fu-${Date.now()}`,
+      quando: nowIso,
+      tipo: 'followup',
+      titolo: `Follow-up programmato: ${payload.titolo}`,
+      dettaglio: `Scadenza: ${new Date(payload.data).toLocaleString('it-IT')}`,
+      autore: companyData.advisor_nome || 'Advisor',
+    });
+
+    await supabase
+      .from('gos_trattative')
+      .update({ azione_necessaria: payload.titolo, ultima_modifica: nowIso })
+      .eq('id', trattativaId);
+  };
+
+  const handleConfermaAzioneFattaTrattativa = async (trattativaId: string) => {
+    const nowIso = new Date().toISOString();
+    const azioneCompletata =
+      activeTrattativa?.azione_programmata_titolo ||
+      activeTrattativa?.azione_necessaria ||
+      'Azione completata';
+
+    appendTimeline(trattativaId, {
+      id: `ev-done-${Date.now()}`,
+      quando: nowIso,
+      tipo: 'completata',
+      titolo: `Completata: ${azioneCompletata}`,
+      dettaglio: 'Confermata come eseguita dalla scheda trattativa',
+      autore: companyData.advisor_nome || 'Advisor',
+    });
+
+    const patch = {
+      azione_necessaria: 'Nessuna azione da fare',
+      azione_programmata_titolo: null,
+      azione_programmata_data: null,
+      ultima_modifica: nowIso,
+    };
+
+    syncTrattativaLocal(trattativaId, patch);
+
+    await supabase
+      .from('gos_trattative')
+      .update({ azione_necessaria: 'Nessuna azione da fare', ultima_modifica: nowIso })
+      .eq('id', trattativaId);
+  };
+
   return (
     <main className="min-h-screen bg-gray-950 text-gray-100 font-sans p-6 md:p-10 space-y-8">
       <div className="max-w-7xl mx-auto space-y-8">
-        
+
         <div className="flex justify-between items-center border-b border-gray-800 pb-6">
           <div className="space-y-2">
             <div className="flex items-center gap-3">
@@ -283,7 +712,6 @@ export default function CompanyPage() {
           </button>
         </div>
 
-        {/* BARRA DEI TAB */}
         <div className="flex flex-wrap gap-6 border-b border-gray-800 pb-4 text-sm font-semibold">
           <button
             onClick={() => { setActiveTab('anagrafica'); setIsEditingAnagrafica(false); }}
@@ -308,6 +736,12 @@ export default function CompanyPage() {
             className={`pb-2 transition-all cursor-pointer ${activeTab === 'offer-builder' ? 'text-white border-b-2 border-[#FF5500]' : 'text-gray-400 hover:text-gray-200'}`}
           >
             Offer Builder
+          </button>
+          <button
+            onClick={() => { setActiveTab('trattative'); setActiveTrattativa(null); }}
+            className={`pb-2 transition-all cursor-pointer ${activeTab === 'trattative' ? 'text-white border-b-2 border-[#FF5500]' : 'text-gray-400 hover:text-gray-200'}`}
+          >
+            Trattative
           </button>
           <button
             onClick={() => setActiveTab('documenti')}
@@ -519,7 +953,7 @@ export default function CompanyPage() {
                           <button
                             onClick={() => {
                               setActiveOffer(off);
-                              setSelectedCompanyModules(off.moduli || []);
+                              setSelectedCompanyModules(Array.isArray(off.moduli) ? off.moduli : []);
                             }}
                             className="px-4 py-2 bg-gray-900 hover:bg-gray-800 text-white font-bold rounded-xl border border-gray-800 transition-all text-xs cursor-pointer"
                           >
@@ -557,20 +991,22 @@ export default function CompanyPage() {
                           onClick={() => setShowOfferPreview(true)}
                           className="px-5 py-2.5 bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold rounded-xl shadow transition-all cursor-pointer uppercase tracking-wider flex items-center gap-2"
                         >
-                          👁️ Visualizza Anteprima Proposta in Chiaro
+                          Visualizza Anteprima Proposta in Chiaro
                         </button>
                       </div>
                     )}
 
-                    <OfferBuilderView 
+                    <OfferBuilderView
                       companyId={companyId}
                       companyCode={companyCode}
+                      offerId={activeOffer.id}
                       selectedCompanyModules={selectedCompanyModules}
                       onRemoveModule={handleRemoveCompanyModule}
                       onOpenModulePicker={(category: any) => {
                         setSelectedCategoryForPicker(category);
                         setIsModulePickerOpen(true);
                       }}
+                      onSaveOfferModules={handleSaveOfferModules}
                     />
                   </div>
                 ) : (
@@ -600,7 +1036,145 @@ export default function CompanyPage() {
           </div>
         )}
 
-        {/* TAB DOCUMENTI IMPLEMENTATA TRAMITE IL COMPONENTE DEDICATO (PASSANDO L'UUID AZIENDA) */}
+        {activeTab === 'trattative' && (
+          <div className="space-y-6">
+            {!activeTrattativa ? (
+              <div className="bg-gray-900 border border-gray-800 p-6 rounded-2xl space-y-6">
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-gray-800 pb-4">
+                  <div>
+                    <h3 className="text-base font-bold text-white uppercase">Trattative Commerciali</h3>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      Elenco delle trattative aperte e chiuse per {companyData.ragione_sociale}.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {(['tutte', 'aperte', 'chiuse'] as const).map((f) => (
+                      <button
+                        key={f}
+                        type="button"
+                        onClick={() => setTrattativeFiltro(f)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-semibold capitalize transition-all cursor-pointer ${
+                          trattativeFiltro === f
+                            ? 'bg-gray-800 text-white border border-gray-600'
+                            : 'bg-gray-950 text-gray-400 border border-gray-800 hover:text-gray-200'
+                        }`}
+                      >
+                        {f === 'chiuse' ? 'Fatte / Chiuse' : f}
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => setShowCreateTrattativaModal(true)}
+                      className="px-4 py-2.5 bg-[#FF5500] hover:bg-orange-600 text-white text-xs font-bold rounded-xl shadow transition-all cursor-pointer uppercase tracking-wider"
+                    >
+                      + Nuova Trattativa
+                    </button>
+                  </div>
+                </div>
+
+                {loadingTrattative ? (
+                  <div className="p-8 text-center text-xs font-mono text-gray-400">Caricamento trattative in corso...</div>
+                ) : filteredTrattative.length === 0 ? (
+                  <div className="p-12 text-center border border-dashed border-gray-800 bg-gray-950 rounded-xl space-y-3">
+                    <p className="text-sm text-gray-400">Nessuna trattativa registrata per questo filtro.</p>
+                    <button
+                      type="button"
+                      onClick={() => setShowCreateTrattativaModal(true)}
+                      className="px-4 py-2.5 bg-[#FF5500] hover:bg-orange-600 text-white text-xs font-bold rounded-xl shadow transition-all cursor-pointer"
+                    >
+                      Crea la prima Trattativa
+                    </button>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto rounded-xl border border-gray-800 bg-gray-950">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="border-b border-gray-800 bg-gray-900/70 text-[10px] uppercase tracking-wider text-gray-400">
+                          <th className="px-4 py-3">Codice</th>
+                          <th className="px-4 py-3">Trattativa</th>
+                          <th className="px-4 py-3">Offerta</th>
+                          <th className="px-4 py-3">Fase</th>
+                          <th className="px-4 py-3">Stato</th>
+                          <th className="px-4 py-3 text-right">Valore</th>
+                          <th className="px-4 py-3 text-right">Prob.</th>
+                          <th className="px-4 py-3">Prossima azione</th>
+                          <th className="px-4 py-3 text-right">Azioni</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-800/80">
+                        {filteredTrattative.map((t) => (
+                          <tr
+                            key={t.id}
+                            onClick={() => setActiveTrattativa(t)}
+                            className="hover:bg-gray-900/70 transition cursor-pointer"
+                          >
+                            <td className="px-4 py-3 font-mono font-bold text-[#FF5500] whitespace-nowrap">
+                              {t.codice_trattativa || 'TRT'}
+                            </td>
+                            <td className="px-4 py-3 font-semibold text-white">{t.titolo}</td>
+                            <td className="px-4 py-3 font-mono text-gray-300 whitespace-nowrap">
+                              {t.codice_offerta || '-'}
+                            </td>
+                            <td className="px-4 py-3 text-gray-300 capitalize">{normalizzaFase(t.fase)}</td>
+                            <td className="px-4 py-3">
+                              <span className="px-2 py-0.5 bg-emerald-950 border border-emerald-800 text-emerald-300 text-[10px] font-semibold rounded uppercase">
+                                {normalizzaStato(t.stato_trattativa)}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-right font-mono text-white whitespace-nowrap">
+                              € {Number(t.valore || 0).toLocaleString('it-IT')}
+                            </td>
+                            <td className="px-4 py-3 text-right font-mono text-gray-400 whitespace-nowrap">
+                              {Math.round(Number(t.probabilita ?? 0.2) * 100)}%
+                            </td>
+                            <td className="px-4 py-3 text-gray-400">{t.azione_necessaria || '-'}</td>
+                            <td className="px-4 py-3 text-right whitespace-nowrap">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setActiveTrattativa(t);
+                                }}
+                                className="px-3 py-1.5 bg-gray-900 hover:bg-gray-800 text-white font-bold rounded-lg border border-gray-700 text-[11px] cursor-pointer"
+                              >
+                                Apri -&gt;
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <SchedaTrattativa
+                dati={buildDatiScheda(activeTrattativa)}
+                onTornaAzienda={() => setActiveTrattativa(null)}
+                onRegistraAttivita={(payload) =>
+                  handleRegistraAttivitaTrattativa(activeTrattativa.id, payload)
+                }
+                onProgrammaFollowUp={(payload) =>
+                  handleProgrammaFollowUpTrattativa(activeTrattativa.id, payload)
+                }
+                onConfermaAzioneFatta={() =>
+                  handleConfermaAzioneFattaTrattativa(activeTrattativa.id)
+                }
+                onNuovaOfferta={() => {
+                  setActiveTab('offer-builder');
+                  setShowCreateOfferModal(true);
+                }}
+                onCambiaStato={(nuovoStato) =>
+                  handleChangeTrattativaStato(activeTrattativa.id, nuovoStato)
+                }
+                onCambiaFase={(nuovaFase) =>
+                  handleChangeTrattativaFase(activeTrattativa.id, nuovaFase)
+                }
+              />
+            )}
+          </div>
+        )}
+
         {activeTab === 'documenti' && (
           <DocumentsView projectId={companyData.id || companyId} />
         )}
@@ -698,6 +1272,154 @@ export default function CompanyPage() {
           </div>
         </div>
       )}
+
+      {showCreateTrattativaModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-gray-900 border border-gray-800 rounded-2xl max-w-lg w-full p-6 space-y-5 shadow-2xl">
+            <div className="flex justify-between items-center border-b border-gray-800 pb-4">
+              <div>
+                <h3 className="text-sm font-extrabold text-white uppercase tracking-wider">Crea Nuova Trattativa</h3>
+                <p className="text-[11px] text-gray-400 mt-0.5">Generazione automatica codice univoco TRT</p>
+              </div>
+              <button onClick={() => setShowCreateTrattativaModal(false)} className="text-gray-400 hover:text-white font-mono text-sm cursor-pointer">X</button>
+            </div>
+
+            <form onSubmit={handleCreateTrattativa} className="space-y-4">
+              <div>
+                <label className="block text-gray-400 mb-1 font-bold uppercase text-[10px]">Titolo Trattativa</label>
+                <input
+                  type="text"
+                  placeholder="Es. Riorganizzazione Commerciale 2027"
+                  value={trattativaTitolo}
+                  onChange={(e) => setTrattativaTitolo(e.target.value)}
+                  className="w-full bg-gray-950 border border-gray-700 px-3.5 py-2.5 rounded-xl text-white text-xs focus:outline-none focus:border-[#FF5500]"
+                  required
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-gray-400 mb-1 font-bold uppercase text-[10px]">Fase</label>
+                  <select
+                    value={trattativaFase}
+                    onChange={(e) => setTrattativaFase(e.target.value as FaseTrattativa)}
+                    className="w-full bg-gray-950 border border-gray-700 px-3 py-2.5 rounded-xl text-white text-xs focus:outline-none focus:border-[#FF5500]"
+                  >
+                    <option value="lead">Lead</option>
+                    <option value="qualifica">Qualifica</option>
+                    <option value="proposta">Proposta</option>
+                    <option value="negoziazione">Negoziazione</option>
+                    <option value="chiusura">Chiusura</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-gray-400 mb-1 font-bold uppercase text-[10px]">Valore (€)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="100"
+                    value={trattativaValore}
+                    onChange={(e) => setTrattativaValore(e.target.value)}
+                    className="w-full bg-gray-950 border border-gray-700 px-3 py-2.5 rounded-xl text-white text-xs focus:outline-none focus:border-[#FF5500]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-gray-400 mb-1 font-bold uppercase text-[10px]">Probabilità (%)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={trattativaProbabilita}
+                    onChange={(e) => setTrattativaProbabilita(e.target.value)}
+                    className="w-full bg-gray-950 border border-gray-700 px-3 py-2.5 rounded-xl text-white text-xs focus:outline-none focus:border-[#FF5500]"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-gray-400 mb-1 font-bold uppercase text-[10px]">
+                  Offerta Collegata (se presente)
+                </label>
+                <select
+                  value={trattativaCodiceOfferta}
+                  onChange={(e) => setTrattativaCodiceOfferta(e.target.value)}
+                  className="w-full bg-gray-950 border border-gray-700 px-3.5 py-2.5 rounded-xl text-white text-xs focus:outline-none focus:border-[#FF5500]"
+                >
+                  <option value="">
+                    {loadingOffers
+                      ? 'Caricamento offerte azienda...'
+                      : offersList.length === 0
+                        ? 'Nessuna offerta presente per questa azienda'
+                        : '-- Nessuna offerta collegata --'}
+                  </option>
+                  {offersList.map((off) => (
+                    <option key={off.id} value={off.codice_offerta || ''}>
+                      {off.codice_offerta || 'OFF'} — {off.titolo || 'Offerta'} ({off.stato || 'Bozza'})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-gray-400 mb-1 font-bold uppercase text-[10px]">Prossima Azione</label>
+                  <input
+                    type="text"
+                    placeholder="Es. Call di qualifica"
+                    value={trattativaProssimaAzione}
+                    onChange={(e) => setTrattativaProssimaAzione(e.target.value)}
+                    className="w-full bg-gray-950 border border-gray-700 px-3.5 py-2.5 rounded-xl text-white text-xs focus:outline-none focus:border-[#FF5500]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-gray-400 mb-1 font-bold uppercase text-[10px]">Chiusura Prevista</label>
+                  <input
+                    type="date"
+                    value={trattativaChiusuraPrevista}
+                    onChange={(e) => setTrattativaChiusuraPrevista(e.target.value)}
+                    className="w-full bg-gray-950 border border-gray-700 px-3.5 py-2.5 rounded-xl text-white text-xs focus:outline-none focus:border-[#FF5500]"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-gray-400 mb-1 font-bold uppercase text-[10px]">Note / Obiettivo</label>
+                <textarea
+                  rows={3}
+                  placeholder="Inserisci i dettagli e gli obiettivi di questa trattativa..."
+                  value={trattativaDescrizione}
+                  onChange={(e) => setTrattativaDescrizione(e.target.value)}
+                  className="w-full bg-gray-950 border border-gray-700 px-3.5 py-2.5 rounded-xl text-white text-xs focus:outline-none focus:border-[#FF5500]"
+                />
+              </div>
+
+              <div className="flex justify-end gap-3 pt-4 border-t border-gray-800">
+                <button type="button" onClick={() => setShowCreateTrattativaModal(false)} className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-bold rounded-xl cursor-pointer">Annulla</button>
+                <button type="submit" disabled={isSubmittingTrattativa} className="px-5 py-2 bg-[#FF5500] hover:bg-orange-600 text-white text-xs font-bold rounded-xl shadow cursor-pointer uppercase tracking-wider disabled:opacity-50">
+                  {isSubmittingTrattativa ? 'Creazione...' : 'Crea Trattativa'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </main>
+  );
+}
+
+export default function CompanyPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="min-h-screen bg-gray-950 text-gray-400 p-10 text-xs font-mono">
+          Caricamento scheda azienda...
+        </main>
+      }
+    >
+      <CompanyPageContent />
+    </Suspense>
   );
 }

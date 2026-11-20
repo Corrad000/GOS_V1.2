@@ -1,7 +1,7 @@
 // src/utils/codeGenerator.ts
 import { createBrowserClient } from '@supabase/ssr';
 
-export type ActivityType = 'PRJ' | 'OFF' | 'QST' | 'TSK' | 'ROL' | 'MOD';
+export type ActivityType = 'PRJ' | 'OFF' | 'QST' | 'TSK' | 'ROL' | 'MOD' | 'TRT';
 
 export async function generateGlobalActivityCode(
   companyCode: string | undefined, 
@@ -20,7 +20,8 @@ export async function generateGlobalActivityCode(
     QST: 'QUESTIONNAIRE_SEQ',
     TSK: 'TASK_SEQ',
     ROL: 'ROLE_SEQ',
-    MOD: 'MODULE_SEQ'
+    MOD: 'MODULE_SEQ',
+    TRT: 'DEAL_SEQ'
   };
 
   try {

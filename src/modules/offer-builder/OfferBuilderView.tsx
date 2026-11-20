@@ -2,30 +2,56 @@
 
 import React, { useState, useEffect } from 'react';
 import { createBrowserClient } from '@supabase/ssr';
-import { OfferModuloList } from './OfferModuloList';
 import { CompanyOfferSummary } from './CompanyOfferSummary';
+
+export interface OfferModule {
+  id: string;
+  category: string;
+  subcategory: string;
+  title: string;
+  description: string;
+  fee: number;
+  estimatedWeeks: number;
+}
+
+export interface CommercialOffer {
+  id: string;
+  code: string;
+  title: string;
+  submissionDate: string;
+  status: string;
+  attentionName: string;
+  attentionEmail: string;
+  modules: OfferModule[];
+  totalFee: number;
+  notes: string;
+}
 
 interface OfferBuilderViewProps {
   companyId?: string;
   companyCode?: string;
+  offerId?: string;
   selectedCompanyModules: any[];
   onRemoveModule: (moduleId: string) => void;
   onOpenModulePicker?: (category: any) => void;
+  onSaveOfferModules?: (modules: any[]) => Promise<void> | void;
 }
 
-export function OfferBuilderView({ 
-  companyId, 
-  companyCode, 
-  selectedCompanyModules, 
-  onRemoveModule, 
-  onOpenModulePicker 
+export function OfferBuilderView({
+  companyId,
+  companyCode,
+  offerId,
+  selectedCompanyModules,
+  onRemoveModule,
+  onOpenModulePicker,
+  onSaveOfferModules
 }: OfferBuilderViewProps) {
   const [categories, setCategories] = useState<any[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<any | null>(null);
   const [modules, setModules] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [savingModules, setSavingModules] = useState(false);
 
-  // Modale creazione modulo offerta (mantenuta per retrocompatibilità o fallback)
   const [showModal, setShowModal] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newDescription, setNewDescription] = useState('');
@@ -39,13 +65,12 @@ export function OfferBuilderView({
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
 
-  // Caricamento categorie dedicate alle OFFERTE da gos_offerte_categorie
   useEffect(() => {
     async function loadCategories() {
       setLoading(true);
       try {
         let { data, error } = await supabase.from('gos_offerte_categorie').select('*').order('nome');
-        
+
         if (error || !data || data.length === 0) {
           data = [
             { id: 'cat-off-1', nome: 'Consulenza Strategica & Advisory' },
@@ -53,7 +78,7 @@ export function OfferBuilderView({
             { id: 'cat-off-3', nome: 'Finanza d’Impresa & Controllo' }
           ];
         }
-        
+
         const cats = data || [];
         setCategories(cats);
         if (cats.length > 0 && !selectedCategory) {
@@ -69,7 +94,6 @@ export function OfferBuilderView({
     loadCategories();
   }, [supabase]);
 
-  // Caricamento moduli offerta per categoria da gos_offerte_moduli
   useEffect(() => {
     if (!selectedCategory) return;
 
@@ -97,7 +121,6 @@ export function OfferBuilderView({
     loadModules();
   }, [selectedCategory, supabase]);
 
-  // Gestione del click sul pulsante "+ Aggiungi Modulo Offerta"
   const handleTriggerAddModule = () => {
     if (onOpenModulePicker && selectedCategory) {
       onOpenModulePicker(selectedCategory);
@@ -106,7 +129,16 @@ export function OfferBuilderView({
     }
   };
 
-  // Salvataggio nuovo modulo offerta sulla tabella dedicata gos_offerte_moduli
+  const handlePersistOfferModules = async () => {
+    if (!onSaveOfferModules) return;
+    setSavingModules(true);
+    try {
+      await onSaveOfferModules(selectedCompanyModules);
+    } finally {
+      setSavingModules(false);
+    }
+  };
+
   const handleCreateModule = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTitle || !selectedCategory) return;
@@ -131,9 +163,10 @@ export function OfferBuilderView({
         .single();
 
       if (error) {
-        const simulated = { id: Date.now().toString(), ...payload };
-        setModules([...modules, simulated]);
-      } else if (data) {
+        throw new Error(error.message);
+      }
+
+      if (data) {
         setModules([...modules, data]);
       }
 
@@ -146,18 +179,29 @@ export function OfferBuilderView({
       setShowModal(false);
     } catch (err: any) {
       console.error('Errore salvataggio modulo offerta:', err?.message || err);
-      alert('Errore durante la creazione del modulo.');
+      alert('Errore durante la creazione del modulo: ' + (err?.message || err));
     }
   };
 
   return (
     <div className="space-y-6">
-      
-      {/* SELETTORE CATEGORIE OFFERTA */}
+
       <div className="bg-[#0B132B] border border-gray-800 rounded-2xl p-6 space-y-4 shadow-xl">
-        <div>
-          <h3 className="text-sm font-bold text-white uppercase tracking-wider">Catalogo Offerte & Servizi - Categorie</h3>
-          <p className="text-xs text-gray-400 mt-0.5">Seleziona l&apos;area strategica per gestire i moduli e listini componibili.</p>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-bold text-white uppercase tracking-wider">Catalogo Offerte & Servizi - Categorie</h3>
+            <p className="text-xs text-gray-400 mt-0.5">Seleziona l&apos;area strategica per gestire i moduli e listini componibili.</p>
+          </div>
+          {offerId && onSaveOfferModules && (
+            <button
+              type="button"
+              disabled={savingModules}
+              onClick={handlePersistOfferModules}
+              className="px-4 py-2 bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold rounded-xl shadow cursor-pointer disabled:opacity-50"
+            >
+              {savingModules ? 'Salvataggio moduli...' : 'Salva Moduli su Offerta'}
+            </button>
+          )}
         </div>
 
         <div className="flex flex-wrap gap-2 pt-2">
@@ -166,6 +210,7 @@ export function OfferBuilderView({
             return (
               <button
                 key={cat.id}
+                type="button"
                 onClick={() => setSelectedCategory(cat)}
                 className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
                   isSelected
@@ -180,14 +225,12 @@ export function OfferBuilderView({
         </div>
       </div>
 
-      {/* RIEPILOGO COMPOSIZIONE OFFERTA DELL'AZIENDA */}
       <CompanyOfferSummary
         selectedModules={selectedCompanyModules}
         onRemoveModule={onRemoveModule}
         onOpenPicker={handleTriggerAddModule}
       />
 
-      {/* MODALE CREAZIONE MODULO OFFERTA (Fallback se non usata come picker) */}
       {showModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
           <div className="bg-gray-900 border border-gray-800 rounded-2xl max-w-lg w-full p-6 space-y-5 shadow-2xl my-8">
@@ -196,7 +239,7 @@ export function OfferBuilderView({
                 <h3 className="text-sm font-extrabold text-white uppercase tracking-wider">Crea Nuovo Modulo Offerta</h3>
                 <p className="text-[11px] text-gray-400 mt-0.5">Categoria: <strong className="text-[#FF5500]">{selectedCategory?.nome}</strong></p>
               </div>
-              <button onClick={() => setShowModal(false)} className="text-gray-400 hover:text-white font-mono text-sm cursor-pointer">✕</button>
+              <button type="button" onClick={() => setShowModal(false)} className="text-gray-400 hover:text-white font-mono text-sm cursor-pointer">✕</button>
             </div>
 
             <form onSubmit={handleCreateModule} className="space-y-4">

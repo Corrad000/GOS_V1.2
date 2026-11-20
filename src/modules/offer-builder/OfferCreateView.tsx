@@ -1,17 +1,18 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { OfferModule, CommercialOffer } from './OfferBuilderView';
+import { useState } from 'react';
+import { supabase } from '@/services/supabase/client';
 import { generateGlobalActivityCode } from '@/utils/codeGenerator';
+import type { OfferModule, CommercialOffer } from './OfferBuilderView';
 
 interface OfferCreateViewProps {
   companyCode?: string;
   companyName: string;
-  companyAddress?: string;     // <-- Aggiunto
-  companyVat?: string;         // <-- Aggiunto
-  companyPhone?: string;       // <-- Aggiunto
-  companyContact?: string;     // <-- Aggiunto
-  companyEmail?: string;       // <-- Aggiunto
+  companyAddress?: string;
+  companyVat?: string;
+  companyPhone?: string;
+  companyContact?: string;
+  companyEmail?: string;
   advisorName: string;
   nextOfferCode: string;
   availableModules: OfferModule[];
@@ -36,29 +37,32 @@ export function OfferCreateView({
   onCancel
 }: OfferCreateViewProps) {
   const [offerTitle, setOfferTitle] = useState(initialOffer ? initialOffer.title : '');
-  
-  // Stati anagrafici precompilati con i dati ereditati dall'azienda (o modificabili all'occorrenza)
-  const [attentionName, setAttentionName] = useState(initialOffer ? initialOffer.attentionName : (companyContact || 'Referente Aziendale'));
-  const [attentionEmail, setAttentionEmail] = useState(initialOffer ? initialOffer.attentionEmail : (companyEmail || 'cliente@azienda.it'));
+
+  const [attentionName, setAttentionName] = useState(
+    initialOffer ? initialOffer.attentionName : (companyContact || 'Referente Aziendale')
+  );
+  const [attentionEmail, setAttentionEmail] = useState(
+    initialOffer ? initialOffer.attentionEmail : (companyEmail || 'cliente@azienda.it')
+  );
   const [clientAddress, setClientAddress] = useState(companyAddress || '');
   const [clientVat, setClientVat] = useState(companyVat || '');
   const [clientPhone, setClientPhone] = useState(companyPhone || '');
-  
-  // Campi strutturati richiesti
+
   const [offerDescription, setOfferDescription] = useState(initialOffer ? initialOffer.notes : '');
   const [offerNotes, setOfferNotes] = useState(initialOffer?.notes || '');
   const [offerTempi, setOfferTempi] = useState('');
   const [offerFee, setOfferFee] = useState(initialOffer ? String(initialOffer.totalFee) : '');
   const [offerValuta, setOfferValuta] = useState('EUR');
 
-  const [selectedModules, setSelectedModules] = useState<OfferModule[]>(initialOffer ? initialOffer.modules : []);
+  const [selectedModules, setSelectedModules] = useState<OfferModule[]>(
+    initialOffer ? initialOffer.modules : []
+  );
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [statusFeedback, setStatusFeedback] = useState<string>('');
 
-  // Categorie Master estratte dinamicamente
   const categories = Array.from(new Set(availableModules.map(m => m.category)));
   const [activeCategory, setActiveCategory] = useState<string>(categories[0] || '');
 
-  // LOGICA DI AUTO-NUMERAZIONE GERARCHICA DEI PARAGRAFI
   const processedCategories = categories.map((catName, catIdx) => {
     const catNum = catIdx + 1;
     const catModules = availableModules.filter(m => m.category === catName);
@@ -92,7 +96,10 @@ export function OfferCreateView({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setStatusFeedback('Invio a Supabase in corso...');
+
     if (!offerTitle.trim()) {
+      setStatusFeedback('Titolo mancante.');
       alert('Inserisci un titolo per l\'offerta.');
       return;
     }
@@ -101,37 +108,95 @@ export function OfferCreateView({
 
     try {
       const baseCompanyCode = companyCode || 'AZ-00024';
-      const offerCode = initialOffer ? initialOffer.code : await generateGlobalActivityCode(baseCompanyCode, 'OFF');
+      const offerCode = initialOffer
+        ? initialOffer.code
+        : (await generateGlobalActivityCode(baseCompanyCode, 'OFF')) || nextOfferCode;
+
+      const dettaglioCompleto = [
+        offerDescription.trim(),
+        `Referente: ${attentionName.trim() || '-'} (${attentionEmail.trim() || '-'})`,
+        `Advisor: ${advisorName || '-'}`,
+        `Totale: ${offerValuta} ${totalFee}`,
+        offerTempi.trim() ? `Tempi: ${offerTempi.trim()}` : null,
+        clientVat.trim() ? `P.IVA/CF: ${clientVat.trim()}` : null,
+        clientAddress.trim() ? `Indirizzo: ${clientAddress.trim()}` : null,
+        clientPhone.trim() ? `Tel: ${clientPhone.trim()}` : null,
+        offerNotes.trim() ? `Note: ${offerNotes.trim()}` : null
+      ]
+        .filter(Boolean)
+        .join(' | ');
+
+      const gosOffertePayload = {
+        company_code: baseCompanyCode,
+        codice_offerta: offerCode,
+        titolo: offerTitle.trim(),
+        descrizione: dettaglioCompleto,
+        stato: initialOffer ? initialOffer.status : 'In attesa',
+        moduli: selectedModules
+      };
+
+      if (initialOffer?.id) {
+        const { data: updatedRow, error: updateError } = await supabase
+          .from('gos_offerte')
+          .update(gosOffertePayload)
+          .eq('id', initialOffer.id)
+          .select()
+          .single();
+
+        if (updateError) {
+          throw new Error(updateError.message);
+        }
+
+        const updatedOffer: CommercialOffer = {
+          id: updatedRow?.id || initialOffer.id,
+          code: updatedRow?.codice_offerta || offerCode,
+          title: updatedRow?.titolo || offerTitle.trim(),
+          submissionDate: initialOffer.submissionDate,
+          status: updatedRow?.stato || initialOffer.status,
+          attentionName: attentionName || 'Referente Aziendale',
+          attentionEmail: attentionEmail || 'cliente@azienda.it',
+          modules: Array.isArray(updatedRow?.moduli) ? updatedRow.moduli : selectedModules,
+          totalFee: totalFee,
+          notes: updatedRow?.descrizione || dettaglioCompleto
+        };
+
+        setStatusFeedback('Offerta aggiornata su Supabase.');
+        onSave(updatedOffer);
+        return;
+      }
+
+      const { data: insertedRow, error: insertError } = await supabase
+        .from('gos_offerte')
+        .insert([gosOffertePayload])
+        .select()
+        .single();
+
+      if (insertError) {
+        throw new Error(insertError.message);
+      }
 
       const savedOffer: CommercialOffer = {
-        id: initialOffer ? initialOffer.id : `off-${Date.now()}`,
-        code: offerCode,
-        title: offerTitle,
-        submissionDate: initialOffer ? initialOffer.submissionDate : new Date().toISOString().split('T')[0],
-        status: initialOffer ? initialOffer.status : 'In attesa',
+        id: insertedRow?.id || `off-${Date.now()}`,
+        code: insertedRow?.codice_offerta || offerCode,
+        title: insertedRow?.titolo || offerTitle.trim(),
+        submissionDate: insertedRow?.created_at
+          ? String(insertedRow.created_at).split('T')[0]
+          : new Date().toISOString().split('T')[0],
+        status: insertedRow?.stato || 'In attesa',
         attentionName: attentionName || 'Referente Aziendale',
         attentionEmail: attentionEmail || 'cliente@azienda.it',
-        modules: selectedModules,
+        modules: Array.isArray(insertedRow?.moduli) ? insertedRow.moduli : selectedModules,
         totalFee: totalFee,
-        notes: `Indirizzo: ${clientAddress} | P.IVA: ${clientVat} | Telefono: ${clientPhone} | Descrizione: ${offerDescription} | Note: ${offerNotes} | Tempi: ${offerTempi} | Valuta: ${offerValuta}`
+        notes: insertedRow?.descrizione || dettaglioCompleto
       };
 
+      setStatusFeedback('Offerta salvata su Supabase.');
       onSave(savedOffer);
-    } catch (err) {
-      console.error('Errore salvataggio offerta:', err);
-      const fallbackOffer: CommercialOffer = {
-        id: initialOffer ? initialOffer.id : `off-${Date.now()}`,
-        code: initialOffer ? initialOffer.code : nextOfferCode,
-        title: offerTitle,
-        submissionDate: initialOffer ? initialOffer.submissionDate : new Date().toISOString().split('T')[0],
-        status: initialOffer ? initialOffer.status : 'In attesa',
-        attentionName: attentionName || 'Referente Aziendale',
-        attentionEmail: attentionEmail || 'cliente@azienda.it',
-        modules: selectedModules,
-        totalFee: totalFee,
-        notes: `Indirizzo: ${clientAddress} | P.IVA: ${clientVat} | Telefono: ${clientPhone} | Descrizione: ${offerDescription} | Note: ${offerNotes} | Tempi: ${offerTempi} | Valuta: ${offerValuta}`
-      };
-      onSave(fallbackOffer);
+    } catch (err: any) {
+      console.error('Errore salvataggio offerta su Supabase:', err);
+      const msg = err?.message || 'Operazione non completata.';
+      setStatusFeedback('Errore: ' + msg);
+      alert('Errore salvataggio offerta su Supabase: ' + msg);
     } finally {
       setIsSubmitting(false);
     }
@@ -139,21 +204,21 @@ export function OfferCreateView({
 
   return (
     <form onSubmit={handleSubmit} className="bg-gray-950 border border-[#FF5500]/40 p-6 rounded-2xl space-y-5 shadow-xl">
-      
-      {/* Header Pagina Creazione / Modifica */}
+
       <div className="flex justify-between items-center border-b border-gray-800 pb-3">
         <div>
           <h3 className="text-sm font-black text-white uppercase tracking-wider">
             {initialOffer ? `Modifica Offerta — ${initialOffer.code}` : 'Composizione Nuova Offerta Commerciale'}
           </h3>
-          <p className="text-[11px] text-gray-400 mt-0.5">Configura i moduli strategici e definisci il perimetro economico per {companyName}.</p>
+          <p className="text-[11px] text-gray-400 mt-0.5">
+            Configura i moduli strategici e definisci il perimetro economico per {companyName}.
+          </p>
         </div>
         <span className="px-3 py-1 bg-orange-950 border border-orange-800 text-orange-300 font-mono text-[11px] font-bold rounded-lg">
           {initialOffer ? initialOffer.code : 'Codice Auto-Sequenziale DB'}
         </span>
       </div>
 
-      {/* ANAGRAFICA AZIENDA EREDITATA DA GOS_AZIENDE */}
       <div className="bg-gray-900 border border-gray-800 p-4 rounded-xl space-y-3">
         <span className="text-[10px] font-mono font-bold uppercase text-[#FF5500] tracking-wider block">
           Anagrafica Cliente (Ereditata da gos_aziende)
@@ -191,7 +256,6 @@ export function OfferCreateView({
         </div>
       </div>
 
-      {/* Dati Generali & Campi Strutturati */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
         <div>
           <label className="block text-gray-400 mb-1 font-bold uppercase text-[10px] tracking-wider">Titolo del Modulo / Proposta</label>
@@ -240,7 +304,6 @@ export function OfferCreateView({
           />
         </div>
 
-        {/* Prezzo senza valuta e selettore valuta separato */}
         <div>
           <label className="block text-gray-400 mb-1 font-bold uppercase text-[10px] tracking-wider">Prezzo (Senza Valuta)</label>
           <input
@@ -301,7 +364,6 @@ export function OfferCreateView({
         </div>
       </div>
 
-      {/* FLUSSO GERARCHICO: CATEGORIE MASTER -> MODULI CON NUMERAZIONE AUTOMATICA */}
       <div className="space-y-4 pt-4 border-t border-gray-800">
         <div className="flex justify-between items-center">
           <div className="flex items-center gap-2">
@@ -310,10 +372,11 @@ export function OfferCreateView({
               Par. {activeCategoryNumber}
             </span>
           </div>
-          <span className="text-[11px] font-mono text-[#FF5500] font-bold">{selectedModules.length} moduli inseriti nell&apos;offerta</span>
+          <span className="text-[11px] font-mono text-[#FF5500] font-bold">
+            {selectedModules.length} moduli inseriti nell&apos;offerta
+          </span>
         </div>
 
-        {/* Tab Categorie Master con indicatore numerico del paragrafo */}
         <div className="flex flex-wrap gap-2">
           {processedCategories.map((cat) => (
             <button
@@ -334,7 +397,6 @@ export function OfferCreateView({
           ))}
         </div>
 
-        {/* Moduli della Categoria Selezionata con auto-indice (es. 3.1, 3.2) */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {filteredModules.map(mod => {
             const isSelected = selectedModules.some(m => m.id === mod.id);
@@ -372,7 +434,12 @@ export function OfferCreateView({
         </div>
       </div>
 
-      {/* Riepilogo Totale e Azioni */}
+      {statusFeedback && (
+        <div className="text-xs font-mono text-amber-300 bg-gray-900 border border-gray-800 px-3.5 py-2 rounded-xl">
+          {statusFeedback}
+        </div>
+      )}
+
       <div className="flex flex-col md:flex-row justify-between items-center pt-4 border-t border-gray-800 gap-4">
         <div>
           <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">Valore Totale Fee Professionali</span>
@@ -382,7 +449,11 @@ export function OfferCreateView({
           <button type="button" onClick={onCancel} className="flex-1 md:flex-none px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-bold rounded-xl cursor-pointer transition-all">
             Annulla
           </button>
-          <button type="submit" disabled={isSubmitting} className="flex-1 md:flex-none px-5 py-2 bg-[#FF5500] hover:bg-orange-600 text-white text-xs font-bold rounded-xl shadow cursor-pointer transition-all disabled:opacity-50">
+          <button
+            type="submit"
+            disabled={isSubmitting}
+            className="flex-1 md:flex-none px-5 py-2 bg-[#FF5500] hover:bg-orange-600 text-white text-xs font-bold rounded-xl shadow cursor-pointer transition-all disabled:opacity-50"
+          >
             {isSubmitting ? 'Salvataggio in corso...' : (initialOffer ? 'Aggiorna Offerta' : 'Salva e Genera Offerta')}
           </button>
         </div>

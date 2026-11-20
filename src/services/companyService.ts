@@ -27,7 +27,7 @@ export const companyService = {
       console.error('Errore nel recupero delle aziende:', error.message);
       throw new Error(error.message);
     }
-    return data || [];
+    return (data as Azienda[]) || [];
   },
 
   // --- [BLOCCO: RECUPERO SINGOLA AZIENDA PER ID] ---
@@ -43,7 +43,7 @@ export const companyService = {
       console.error('Errore nel recupero dell\'azienda:', error.message);
       throw new Error(error.message);
     }
-    return data;
+    return data as Azienda;
   },
 
   // --- [BLOCCO: CREAZIONE NUOVA AZIENDA] ---
@@ -59,6 +59,6 @@ export const companyService = {
       console.error('Errore durante la creazione dell\'azienda:', error.message);
       throw new Error(error.message);
     }
-    return data;
+    return data as Azienda;
   }
 };
