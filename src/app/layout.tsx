@@ -5,6 +5,24 @@ import Link from 'next/link';
 import { useState, useEffect, Suspense } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
+import type { Metadata, Viewport } from 'next';
+
+export const viewport: Viewport = {
+  themeColor: '#FF5500',
+  width: 'device-width',
+  initialScale: 1,
+};
+
+export const metadata: Metadata = {
+  title: 'GOS 1.2 — Glaring LLP Infrastructure',
+  description: 'Strategic & Operation Advisors Infrastructure',
+  manifest: '/manifest.webmanifest',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'black-translucent',
+    title: 'GOS 1.2',
+  },
+};
 
 function NavigationHeader() {
   const router = useRouter();
@@ -142,7 +160,7 @@ function LayoutShell({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div data-gos-layout="app" className="min-h-screen w-full flex flex-col">
+    <div data-gos-layout="app" className="min-h-screen w-full overflow-x-hidden flex flex-col">
       <Suspense fallback={<div className="h-14 bg-[#050B14] w-full" />}>
         <NavigationHeader />
       </Suspense>
@@ -174,7 +192,7 @@ export default function RootLayout({
     <html lang="it" suppressHydrationWarning>
       <body
         suppressHydrationWarning
-        className="bg-[#050B14] text-white antialiased min-h-screen w-full flex flex-col selection:bg-orange-600 selection:text-white"
+        className="bg-[#050B14] text-white antialiased min-h-screen w-full overflow-x-hidden flex flex-col selection:bg-orange-600 selection:text-white"
       >
         <Suspense fallback={children}>
           <LayoutShell>{children}</LayoutShell>
