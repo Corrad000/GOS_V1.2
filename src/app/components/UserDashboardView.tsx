@@ -1,14 +1,11 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
 import { CompanyItem, CompanyTable } from './CompanyTable';
 import { UsersTable } from './UsersTable';
-import { QuestCategory } from './QuestCategory';
-import { QuestModulo } from './QuestModulo';
-import { ModuleEditView } from './ModuleEditView';
 import { CatalogDashboardView } from '@/modules/offer-builder/CatalogDashboardView';
-import { generateGlobalActivityCode } from '@/utils/codeGenerator';
 
 interface UserDashboardViewProps {
   userRole: 'admin' | 'user' | 'advisor' | 'Network Partner';
@@ -17,17 +14,15 @@ interface UserDashboardViewProps {
 }
 
 export function UserDashboardView({ userRole, userName, companies }: UserDashboardViewProps) {
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState<'aziende' | 'questionari' | 'offerte' | 'utenti'>('aziende');
   const [localCompanies, setLocalCompanies] = useState<CompanyItem[]>(companies);
 
-  // Stati Supabase per Categorie e Moduli Questionari Master
+  // Gallery Questionari Master (attivi / creati)
   const [categories, setCategories] = useState<any[]>([]);
-  const [selectedCategory, setSelectedCategory] = useState<any | null>(null);
-  const [modules, setModules] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
-
-  // Stato per la pagina Edit Module delle domande del modulo selezionato
-  const [activeConfigModule, setActiveConfigModule] = useState<any | null>(null);
+  const [filterCategoryId, setFilterCategoryId] = useState<string>('all');
+  const [masterQuestionnaires, setMasterQuestionnaires] = useState<any[]>([]);
+  const [loadingQuestionnaires, setLoadingQuestionnaires] = useState(false);
 
   // Metriche Reali Cruscotto
   const [stats, setStats] = useState({
@@ -36,23 +31,6 @@ export function UserDashboardView({ userRole, userName, companies }: UserDashboa
     totalCategories: 0,
     activeAdvisors: 1
   });
-
-  // Stati Modale Modulo Questionario Master
-  const [showModal, setShowModal] = useState(false);
-  const [newTitle, setNewTitle] = useState('');
-  const [newDomanda, setNewDomanda] = useState('');
-  const [newTipoRisposta, setNewTipoRisposta] = useState('rating_1_5');
-
-  // Stati Modale Categoria Master (Creazione)
-  const [showCategoryModal, setShowCategoryModal] = useState(false);
-  const [newCategoryName, setNewCategoryName] = useState('');
-  const [newCategoryDesc, setNewCategoryDesc] = useState('');
-
-  // Stati Modale Categoria Master (Modifica)
-  const [showEditCategoryModal, setShowEditCategoryModal] = useState(false);
-  const [editingCategory, setEditingCategory] = useState<any | null>(null);
-  const [editCategoryName, setEditCategoryName] = useState('');
-  const [editCategoryDesc, setEditCategoryDesc] = useState('');
 
   const supabase = useMemo(
     () =>
@@ -70,9 +48,16 @@ export function UserDashboardView({ userRole, userName, companies }: UserDashboa
   useEffect(() => {
     async function fetchSystemStats() {
       try {
-        const { count: modCount } = await supabase.from('gos_moduli').select('*', { count: 'exact', head: true }).is('company_code', null);
-        const { count: catCount } = await supabase.from('gos_categorie').select('*', { count: 'exact', head: true });
-        const { count: profCount } = await supabase.from('gos_profiles').select('*', { count: 'exact', head: true });
+        const { count: modCount } = await supabase
+          .from('gos_moduli')
+          .select('*', { count: 'exact', head: true })
+          .is('company_code', null);
+        const { count: catCount } = await supabase
+          .from('gos_categorie')
+          .select('*', { count: 'exact', head: true });
+        const { count: profCount } = await supabase
+          .from('gos_profiles')
+          .select('*', { count: 'exact', head: true });
 
         setStats({
           totalCompanies: localCompanies.length,
@@ -90,183 +75,56 @@ export function UserDashboardView({ userRole, userName, companies }: UserDashboa
   useEffect(() => {
     if (activeTab !== 'questionari') return;
 
-    async function loadCategories() {
-      setLoading(true);
+    async function loadQuestionnairesGallery() {
+      setLoadingQuestionnaires(true);
       try {
-        const { data, error } = await supabase.from('gos_categorie').select('*').order('nome');
-        if (error) throw error;
-        setCategories(data || []);
-        if (data && data.length > 0 && !selectedCategory) {
-          setSelectedCategory(data[0]);
-        }
+        const [{ data: catsData, error: catsErr }, { data: modsData, error: modsErr }] = await Promise.all([
+          supabase.from('gos_categorie').select('*').order('nome'),
+          supabase
+            .from('gos_moduli')
+            .select('*')
+            .is('company_code', null)
+            .order('created_at', { ascending: false })
+        ]);
+
+        if (catsErr) throw catsErr;
+        if (modsErr) throw modsErr;
+
+        setCategories(catsData || []);
+        setMasterQuestionnaires(modsData || []);
       } catch (err: any) {
-        console.error('Errore caricamento categorie:', err?.message || err);
+        console.error('Errore caricamento gallery questionari master:', err?.message || err);
+        setMasterQuestionnaires([]);
       } finally {
-        setLoading(false);
+        setLoadingQuestionnaires(false);
       }
     }
-    loadCategories();
+
+    loadQuestionnairesGallery();
   }, [activeTab, supabase]);
 
-  useEffect(() => {
-    if (!selectedCategory) return;
-
-    async function loadModules() {
-      try {
-        const { data, error } = await supabase
-          .from('gos_moduli')
-          .select('*')
-          .eq('categoria_id', selectedCategory.id)
-          .is('company_code', null);
-
-        if (error) throw error;
-        setModules(data || []);
-      } catch (err: any) {
-        console.error('Errore caricamento moduli:', err?.message || err);
-      }
+  const categoryMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const c of categories) {
+      map[String(c.id)] = c.nome;
     }
-    loadModules();
-  }, [selectedCategory, supabase]);
+    return map;
+  }, [categories]);
 
-  // Creazione Categoria Master
-  const handleCreateCategory = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newCategoryName.trim()) return;
+  const filteredQuestionnaires = useMemo(() => {
+    if (filterCategoryId === 'all') return masterQuestionnaires;
+    return masterQuestionnaires.filter((q) => String(q.categoria_id) === String(filterCategoryId));
+  }, [masterQuestionnaires, filterCategoryId]);
 
+  const handleDeleteQuestionnaire = async (id: string) => {
+    if (!confirm('Sei sicuro di voler eliminare questo questionario master?')) return;
     try {
-      const { data, error } = await supabase
-        .from('gos_categorie')
-        .insert([{ nome: newCategoryName, descrizione: newCategoryDesc }])
-        .select()
-        .single();
-
+      const { error } = await supabase.from('gos_moduli').delete().eq('id', id);
       if (error) throw error;
-
-      if (data) {
-        setCategories(prev => [...prev, data]);
-        setSelectedCategory(data);
-        setStats(prev => ({ ...prev, totalCategories: prev.totalCategories + 1 }));
-      }
-
-      setNewCategoryName('');
-      setNewCategoryDesc('');
-      setShowCategoryModal(false);
+      setMasterQuestionnaires((prev) => prev.filter((q) => q.id !== id));
+      setStats((prev) => ({ ...prev, totalModules: Math.max(0, prev.totalModules - 1) }));
     } catch (err: any) {
-      alert('Errore nella creazione della categoria: ' + (err.message || err));
-    }
-  };
-
-  const handleOpenEditCategory = (cat: any, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setEditingCategory(cat);
-    setEditCategoryName(cat.nome);
-    setEditCategoryDesc(cat.descrizione || '');
-    setShowEditCategoryModal(true);
-  };
-
-  const handleUpdateCategory = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingCategory || !editCategoryName.trim()) return;
-
-    try {
-      const { error } = await supabase
-        .from('gos_categorie')
-        .update({ nome: editCategoryName, descrizione: editCategoryDesc })
-        .eq('id', editingCategory.id);
-
-      if (error) throw error;
-
-      setCategories(prev => prev.map(c => c.id === editingCategory.id ? { ...c, nome: editCategoryName, descrizione: editCategoryDesc } : c));
-      if (selectedCategory?.id === editingCategory.id) {
-        setSelectedCategory({ ...selectedCategory, nome: editCategoryName, descrizione: editCategoryDesc });
-      }
-
-      setShowEditCategoryModal(false);
-      setEditingCategory(null);
-    } catch (err: any) {
-      alert('Errore durante l\'aggiornamento della categoria: ' + (err.message || err));
-    }
-  };
-
-  const handleDeleteCategory = async (catId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!confirm('Sei sicuro di voler eliminare questa categoria e tutti i moduli associati?')) return;
-
-    try {
-      const { error } = await supabase.from('gos_categorie').delete().eq('id', catId);
-      if (error) throw error;
-
-      setCategories(prev => prev.filter(c => c.id !== catId));
-      if (selectedCategory?.id === catId) {
-        setSelectedCategory(null);
-        setModules([]);
-      }
-      setStats(prev => ({ ...prev, totalCategories: Math.max(0, prev.totalCategories - 1) }));
-    } catch (err: any) {
-      alert('Errore durante l\'eliminazione della categoria: ' + (err.message || err));
-    }
-  };
-
-  const handleCreateModule = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newTitle || !selectedCategory || !newDomanda) return;
-
-    try {
-      const codiceModulo = await generateGlobalActivityCode('MASTER', 'QST');
-
-      const { data: modData, error: modErr } = await supabase
-        .from('gos_moduli')
-        .insert([
-          {
-            categoria_id: selectedCategory.id,
-            company_code: null,
-            codice_modulo: codiceModulo,
-            titolo: newTitle,
-            descrizione: 'Creato da libreria master GOS',
-            stato: 'Attivo',
-            versione: '1.0'
-          }
-        ])
-        .select()
-        .single();
-
-      if (modErr) throw modErr;
-
-      if (modData) {
-        await supabase.from('gos_domande').insert([
-          {
-            modulo_id: modData.id,
-            sezione: selectedCategory.nome,
-            testo_domanda: newDomanda,
-            tipo_risposta: newTipoRisposta,
-            peso: 1.0,
-            ordine: 1
-          }
-        ]);
-        setModules(prev => [modData, ...prev]);
-        setStats(prev => ({ ...prev, totalModules: prev.totalModules + 1 }));
-      }
-
-      setNewTitle('');
-      setNewDomanda('');
-      setShowModal(false);
-    } catch (err: any) {
-      console.error('Errore salvataggio modulo:', err?.message || err);
-      alert('Errore durante la creazione del modulo.');
-    }
-  };
-
-  const handleDeleteModule = async (modId: string) => {
-    if (!confirm('Sei sicuro di voler eliminare questo modulo?')) return;
-
-    try {
-      const { error } = await supabase.from('gos_moduli').delete().eq('id', modId);
-      if (error) throw error;
-
-      setModules(prev => prev.filter(m => m.id !== modId));
-      setStats(prev => ({ ...prev, totalModules: Math.max(0, prev.totalModules - 1) }));
-    } catch (err: any) {
-      alert('Errore durante l\'eliminazione del modulo: ' + (err.message || err));
+      alert('Errore durante l\'eliminazione: ' + (err?.message || err));
     }
   };
 
@@ -290,7 +148,7 @@ export function UserDashboardView({ userRole, userName, companies }: UserDashboa
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <div className="bg-gray-950 border border-gray-800 rounded-none p-4 space-y-1">
-            <span className="text-[10px] font-mono font-bold uppercase text-gray-400 tracking-wider">Moduli / Categorie</span>
+            <span className="text-[10px] font-mono font-bold uppercase text-gray-400 tracking-wider">Questionari / Categorie</span>
             <div className="text-lg font-black text-white font-mono">
               <span className="text-emerald-400">{stats.totalModules}</span> <span className="text-gray-600">/</span> <span className="text-blue-400">{stats.totalCategories}</span>
             </div>
@@ -322,7 +180,8 @@ export function UserDashboardView({ userRole, userName, companies }: UserDashboa
       {/* BARRA DEI TAB */}
       <div className="flex flex-wrap items-center gap-3 border-b border-gray-800 pb-4">
         <button
-          onClick={() => { setActiveTab('aziende'); setActiveConfigModule(null); }}
+          type="button"
+          onClick={() => setActiveTab('aziende')}
           className={`px-5 py-2.5 text-xs font-bold rounded-none transition-all shadow-md cursor-pointer inline-flex items-center gap-2 ${
             activeTab === 'aziende'
               ? 'bg-[#FF5500] hover:bg-orange-600 text-white border border-orange-500 shadow-orange-950/50'
@@ -333,18 +192,20 @@ export function UserDashboardView({ userRole, userName, companies }: UserDashboa
         </button>
 
         <button
-          onClick={() => { setActiveTab('questionari'); setActiveConfigModule(null); }}
+          type="button"
+          onClick={() => setActiveTab('questionari')}
           className={`px-5 py-2.5 text-xs font-bold rounded-none transition-all shadow-md cursor-pointer inline-flex items-center gap-2 ${
             activeTab === 'questionari'
               ? 'bg-[#FF5500] hover:bg-orange-600 text-white border border-orange-500 shadow-orange-950/50'
               : 'bg-[#0B132B] text-gray-400 border border-gray-800 hover:bg-gray-800 hover:text-white'
           }`}
         >
-          Libreria Master Questionari ({modules.length > 0 ? modules.length : stats.totalModules})
+          Questionari Master ({masterQuestionnaires.length > 0 ? masterQuestionnaires.length : stats.totalModules})
         </button>
 
         <button
-          onClick={() => { setActiveTab('offerte'); setActiveConfigModule(null); }}
+          type="button"
+          onClick={() => setActiveTab('offerte')}
           className={`px-5 py-2.5 text-xs font-bold rounded-none transition-all shadow-md cursor-pointer inline-flex items-center gap-2 ${
             activeTab === 'offerte'
               ? 'bg-[#FF5500] hover:bg-orange-600 text-white border border-orange-500 shadow-orange-950/50'
@@ -355,7 +216,8 @@ export function UserDashboardView({ userRole, userName, companies }: UserDashboa
         </button>
 
         <button
-          onClick={() => { setActiveTab('utenti'); setActiveConfigModule(null); }}
+          type="button"
+          onClick={() => setActiveTab('utenti')}
           className={`px-5 py-2.5 text-xs font-bold rounded-none transition-all shadow-md cursor-pointer inline-flex items-center gap-2 ${
             activeTab === 'utenti'
               ? 'bg-[#FF5500] hover:bg-orange-600 text-white border border-orange-500 shadow-orange-950/50'
@@ -380,187 +242,129 @@ export function UserDashboardView({ userRole, userName, companies }: UserDashboa
       )}
 
       {activeTab === 'questionari' && (
-        <div className="space-y-6">
-          {!activeConfigModule ? (
-            <>
-              <QuestCategory
-                categories={categories}
-                selectedCategory={selectedCategory}
-                onSelectCategory={setSelectedCategory}
-                loading={loading}
-                onOpenCreateCategoryModal={() => setShowCategoryModal(true)}
-                onOpenEditCategoryModal={handleOpenEditCategory}
-                onDeleteCategory={handleDeleteCategory}
-              />
+        <div className="bg-[#0B132B] border border-gray-800 rounded-none p-6 space-y-6 shadow-xl">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-gray-800 pb-4">
+            <div>
+              <h3 className="text-base font-black text-white uppercase tracking-wider">
+                Gallery Questionari Master Attivi / Creati
+              </h3>
+              <p className="text-xs text-gray-400 mt-0.5">
+                Consulta i questionari disponibili o apri la pagina dedicata per crearne e lavorarne uno.
+              </p>
+            </div>
 
-              <QuestModulo
-                selectedCategory={selectedCategory}
-                modules={modules}
-                loading={loading}
-                onOpenCreateModal={() => setShowModal(true)}
-                onDeleteModule={handleDeleteModule}
-                onConfigureModule={(mod: any) => setActiveConfigModule(mod)}
-              />
-            </>
+            <button
+              type="button"
+              onClick={() => router.push('/questionari-master?mode=new')}
+              className="px-4 py-2.5 bg-[#FF5500] hover:bg-orange-600 text-white text-xs font-bold rounded-none shadow transition-all cursor-pointer uppercase tracking-wider"
+            >
+              + Aggiungi Questionario
+            </button>
+          </div>
+
+          {/* Filtro rapido per categoria */}
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setFilterCategoryId('all')}
+              className={`px-3 py-1.5 text-xs font-bold rounded-none border cursor-pointer transition-all ${
+                filterCategoryId === 'all'
+                  ? 'bg-[#FF5500] text-white border-orange-500'
+                  : 'bg-gray-950 text-gray-400 border-gray-800 hover:text-white'
+              }`}
+            >
+              Tutte le categorie ({masterQuestionnaires.length})
+            </button>
+            {categories.map((cat) => (
+              <button
+                key={cat.id}
+                type="button"
+                onClick={() => setFilterCategoryId(String(cat.id))}
+                className={`px-3 py-1.5 text-xs font-bold rounded-none border cursor-pointer transition-all ${
+                  String(filterCategoryId) === String(cat.id)
+                    ? 'bg-[#FF5500] text-white border-orange-500'
+                    : 'bg-gray-950 text-gray-400 border-gray-800 hover:text-white'
+                }`}
+              >
+                {cat.nome}
+              </button>
+            ))}
+          </div>
+
+          {loadingQuestionnaires ? (
+            <div className="p-8 text-center text-xs font-mono text-gray-400">
+              Caricamento gallery questionari...
+            </div>
+          ) : filteredQuestionnaires.length === 0 ? (
+            <div className="p-12 text-center border border-dashed border-gray-800 bg-gray-950 rounded-none space-y-3">
+              <p className="text-sm text-gray-400">
+                Nessun questionario master trovato per il filtro selezionato.
+              </p>
+              <button
+                type="button"
+                onClick={() => router.push('/questionari-master?mode=new')}
+                className="px-4 py-2.5 bg-[#FF5500] hover:bg-orange-600 text-white text-xs font-bold rounded-none shadow transition-all cursor-pointer uppercase tracking-wider"
+              >
+                + Aggiungi il primo Questionario
+              </button>
+            </div>
           ) : (
-            <ModuleEditView
-              modulo={activeConfigModule}
-              onBack={() => setActiveConfigModule(null)}
-            />
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {filteredQuestionnaires.map((q) => {
+                const catName =
+                  categoryMap[String(q.categoria_id)] || q.categoria_nome || 'Categoria non assegnata';
+                return (
+                  <div
+                    key={q.id}
+                    className="bg-slate-800/90 hover:bg-slate-800 border border-slate-600/80 hover:border-slate-500 rounded-none p-5 flex flex-col justify-between space-y-4 shadow-md transition-all"
+                  >
+                    <div className="space-y-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="px-2 py-0.5 bg-gray-950 text-[#FF5500] border border-slate-700 font-mono text-[10px] font-bold uppercase">
+                          {q.codice_modulo || 'QST'}
+                        </span>
+                        <span className="px-2 py-0.5 bg-emerald-950 border border-emerald-700 text-emerald-300 text-[10px] font-semibold uppercase">
+                          {q.stato || 'Attivo'}
+                        </span>
+                      </div>
+
+                      <div className="text-[11px] font-mono text-amber-300 uppercase tracking-wide">
+                        Categoria: {catName}
+                      </div>
+
+                      <h4 className="text-sm font-bold text-white uppercase">{q.titolo}</h4>
+                      <p className="text-xs text-slate-300 line-clamp-2">
+                        {q.descrizione || 'Nessuna descrizione inserita.'}
+                      </p>
+                    </div>
+
+                    <div className="pt-3 border-t border-slate-700/80 flex items-center justify-between gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteQuestionnaire(q.id)}
+                        className="px-2.5 py-1.5 bg-red-950/60 hover:bg-red-900 text-red-300 border border-red-800 text-[11px] font-bold rounded-none cursor-pointer transition-all"
+                      >
+                        Elimina
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => router.push(`/questionari-master?id=${q.id}`)}
+                        className="px-3.5 py-1.5 bg-[#FF5500] hover:bg-orange-600 text-white text-xs font-bold rounded-none cursor-pointer transition-all"
+                      >
+                        Apri / Modifica →
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           )}
         </div>
       )}
 
       {activeTab === 'offerte' && (
         <CatalogDashboardView />
-      )}
-
-      {/* MODALE CREAZIONE MODULO MASTER */}
-      {showModal && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
-          <div className="bg-gray-900 border border-gray-800 rounded-none max-w-lg w-full p-6 space-y-6 shadow-2xl">
-            <div className="flex justify-between items-center border-b border-gray-800 pb-4">
-              <div>
-                <h3 className="text-sm font-extrabold text-white uppercase tracking-wider">Crea Nuovo Modulo Master</h3>
-                <p className="text-[11px] text-gray-400 mt-0.5">Categoria attiva: <strong className="text-[#FF5500]">{selectedCategory?.nome}</strong></p>
-              </div>
-              <button onClick={() => setShowModal(false)} className="text-gray-400 hover:text-white font-mono text-sm cursor-pointer">✕</button>
-            </div>
-
-            <form onSubmit={handleCreateModule} className="space-y-4">
-              <div>
-                <label className="block text-gray-400 mb-1 font-bold uppercase text-[10px]">Titolo del Modulo</label>
-                <input
-                  type="text"
-                  placeholder="Es. Analisi Redditività Operativa v1"
-                  value={newTitle}
-                  onChange={(e) => setNewTitle(e.target.value)}
-                  className="w-full bg-gray-950 border border-gray-700 px-3.5 py-2.5 rounded-none text-white text-xs focus:outline-none focus:border-[#FF5500]"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-gray-400 mb-1 font-bold uppercase text-[10px]">Domanda Iniziale</label>
-                <input
-                  type="text"
-                  placeholder="Es. Qual è il margine EBITDA target per il prossimo trimestre?"
-                  value={newDomanda}
-                  onChange={(e) => setNewDomanda(e.target.value)}
-                  className="w-full bg-gray-950 border border-gray-700 px-3.5 py-2.5 rounded-none text-white text-xs focus:outline-none focus:border-[#FF5500]"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-gray-400 mb-1 font-bold uppercase text-[10px]">Tipo di Risposta Attesa</label>
-                <select
-                  value={newTipoRisposta}
-                  onChange={(e) => setNewTipoRisposta(e.target.value)}
-                  className="w-full bg-gray-950 border border-gray-700 px-3.5 py-2.5 rounded-none text-white text-xs focus:outline-none focus:border-[#FF5500]"
-                >
-                  <option value="rating_1_5">Valutazione numerica (1 a 5)</option>
-                  <option value="text">Testo libero</option>
-                  <option value="boolean">Sì / No (Booleana)</option>
-                  <option value="choice">Selezione multipla</option>
-                </select>
-              </div>
-
-              <div className="flex justify-end gap-3 pt-4 border-t border-gray-800">
-                <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-bold rounded-none cursor-pointer">Annulla</button>
-                <button type="submit" className="px-5 py-2 bg-[#FF5500] hover:bg-orange-600 text-white text-xs font-bold rounded-none shadow cursor-pointer uppercase tracking-wider">Salva in Supabase</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* MODALE CREAZIONE CATEGORIA MASTER */}
-      {showCategoryModal && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
-          <div className="bg-gray-900 border border-gray-800 rounded-none max-w-lg w-full p-6 space-y-6 shadow-2xl">
-            <div className="flex justify-between items-center border-b border-gray-800 pb-4">
-              <div>
-                <h3 className="text-sm font-extrabold text-white uppercase tracking-wider">Crea Nuova Categoria Master</h3>
-                <p className="text-[11px] text-gray-400 mt-0.5">Aggiungi una nuova area strategica di questionari</p>
-              </div>
-              <button onClick={() => setShowCategoryModal(false)} className="text-gray-400 hover:text-white font-mono text-sm cursor-pointer">✕</button>
-            </div>
-
-            <form onSubmit={handleCreateCategory} className="space-y-4">
-              <div>
-                <label className="block text-gray-400 mb-1 font-bold uppercase text-[10px]">Nome Categoria</label>
-                <input
-                  type="text"
-                  placeholder="Es. Risk Management & Sicurezza"
-                  value={newCategoryName}
-                  onChange={(e) => setNewCategoryName(e.target.value)}
-                  className="w-full bg-gray-950 border border-gray-700 px-3.5 py-2.5 rounded-none text-white text-xs focus:outline-none focus:border-[#FF5500]"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-gray-400 mb-1 font-bold uppercase text-[10px]">Descrizione Obiettivo</label>
-                <textarea
-                  rows={3}
-                  placeholder="Descrivi l'ambito di analisi di questa categoria..."
-                  value={newCategoryDesc}
-                  onChange={(e) => setNewCategoryDesc(e.target.value)}
-                  className="w-full bg-gray-950 border border-gray-700 px-3.5 py-2.5 rounded-none text-white text-xs focus:outline-none focus:border-[#FF5500]"
-                />
-              </div>
-
-              <div className="flex justify-end gap-3 pt-4 border-t border-gray-800">
-                <button type="button" onClick={() => setShowCategoryModal(false)} className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-bold rounded-none cursor-pointer">Annulla</button>
-                <button type="submit" className="px-5 py-2 bg-[#FF5500] hover:bg-orange-600 text-white text-xs font-bold rounded-none shadow cursor-pointer uppercase tracking-wider">Salva Categoria</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* MODALE MODIFICA CATEGORIA MASTER */}
-      {showEditCategoryModal && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
-          <div className="bg-gray-900 border border-gray-800 rounded-none max-w-lg w-full p-6 space-y-6 shadow-2xl">
-            <div className="flex justify-between items-center border-b border-gray-800 pb-4">
-              <div>
-                <h3 className="text-sm font-extrabold text-white uppercase tracking-wider">Modifica Categoria Master</h3>
-                <p className="text-[11px] text-gray-400 mt-0.5">Aggiorna i dati dell'area strategica</p>
-              </div>
-              <button onClick={() => setShowEditCategoryModal(false)} className="text-gray-400 hover:text-white font-mono text-sm cursor-pointer">✕</button>
-            </div>
-
-            <form onSubmit={handleUpdateCategory} className="space-y-4">
-              <div>
-                <label className="block text-gray-400 mb-1 font-bold uppercase text-[10px]">Nome Categoria</label>
-                <input
-                  type="text"
-                  value={editCategoryName}
-                  onChange={(e) => setEditCategoryName(e.target.value)}
-                  className="w-full bg-gray-950 border border-gray-700 px-3.5 py-2.5 rounded-none text-white text-xs focus:outline-none focus:border-[#FF5500]"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-gray-400 mb-1 font-bold uppercase text-[10px]">Descrizione Obiettivo</label>
-                <textarea
-                  rows={3}
-                  value={editCategoryDesc}
-                  onChange={(e) => setEditCategoryDesc(e.target.value)}
-                  className="w-full bg-gray-950 border border-gray-700 px-3.5 py-2.5 rounded-none text-white text-xs focus:outline-none focus:border-[#FF5500]"
-                />
-              </div>
-
-              <div className="flex justify-end gap-3 pt-4 border-t border-gray-800">
-                <button type="button" onClick={() => setShowEditCategoryModal(false)} className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-bold rounded-none cursor-pointer">Annulla</button>
-                <button type="submit" className="px-5 py-2 bg-[#FF5500] hover:bg-orange-600 text-white text-xs font-bold rounded-none shadow cursor-pointer uppercase tracking-wider">Salva Modifiche</button>
-              </div>
-            </form>
-          </div>
-        </div>
       )}
 
       {activeTab === 'utenti' && (

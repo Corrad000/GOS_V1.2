@@ -401,7 +401,14 @@ export function OfferCreateView({
           {filteredModules.map(mod => {
             const isSelected = selectedModules.some(m => m.id === mod.id);
             return (
-              <div key={mod.id} className={`p-3.5 rounded-xl border transition-all flex flex-col justify-between space-y-2.5 ${isSelected ? 'bg-orange-950/30 border-orange-500/70 shadow' : 'bg-gray-900 border-gray-800 hover:border-gray-700'}`}>
+              <div
+                key={mod.id}
+                className={`p-3.5 rounded-xl border transition-all flex flex-col justify-between space-y-2.5 ${
+                  isSelected
+                    ? 'bg-orange-950/40 border-orange-500/80 shadow'
+                    : 'bg-slate-800/90 hover:bg-slate-800 border-slate-600/80 hover:border-slate-500 shadow-sm'
+                }`}
+              >
                 <div className="space-y-1">
                   <div className="flex items-center justify-between">
                     <span className="text-[10px] font-mono uppercase text-[#FF5500] font-bold tracking-wide">
@@ -409,15 +416,15 @@ export function OfferCreateView({
                     </span>
                   </div>
                   <h5 className="text-xs font-bold text-white">{mod.title}</h5>
-                  <p className="text-[11px] text-gray-400 leading-relaxed">{mod.description}</p>
+                  <p className="text-[11px] text-slate-300 leading-relaxed">{mod.description}</p>
                   <div className="pt-1 flex items-center gap-3 font-mono text-xs">
                     <span className="text-emerald-400 font-extrabold">{offerValuta} {mod.fee.toLocaleString()}</span>
-                    <span className="text-gray-500">|</span>
-                    <span className="text-gray-400">{mod.estimatedWeeks} settimane</span>
+                    <span className="text-slate-500">|</span>
+                    <span className="text-slate-300">{mod.estimatedWeeks} settimane</span>
                   </div>
                 </div>
 
-                <div className="pt-2 border-t border-gray-800 flex justify-end">
+                <div className="pt-2 border-t border-slate-700/80 flex justify-end">
                   {!isSelected ? (
                     <button type="button" onClick={() => handleAddModule(mod)} className="px-3 py-1.5 bg-[#FF5500] hover:bg-orange-600 text-white text-[10px] font-bold rounded-xl cursor-pointer transition-all">
                       + Aggiungi all&apos;offerta

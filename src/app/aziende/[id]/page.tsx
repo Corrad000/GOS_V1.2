@@ -903,7 +903,7 @@ function CompanyPageContent() {
         {activeTab === 'offer-builder' && (
           <div className="space-y-6">
             {!activeOffer ? (
-              <div className="bg-gray-900 border border-gray-800 p-6 rounded-2xl space-y-6">
+              <div className="bg-gray-950 border border-gray-800 p-6 rounded-2xl space-y-6">
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-gray-800 pb-4">
                   <div>
                     <h3 className="text-base font-bold text-white uppercase">Offerte Commerciali</h3>
@@ -920,7 +920,7 @@ function CompanyPageContent() {
                 {loadingOffers ? (
                   <div className="p-8 text-center text-xs font-mono text-gray-400">Caricamento offerte in corso...</div>
                 ) : offersList.length === 0 ? (
-                  <div className="p-12 text-center border border-dashed border-gray-800 bg-gray-950 rounded-xl space-y-3">
+                  <div className="p-12 text-center border border-dashed border-gray-800 bg-gray-900 rounded-xl space-y-3">
                     <p className="text-sm text-gray-400">Nessuna offerta commerciale registrata per questa azienda.</p>
                     <button
                       onClick={() => setShowCreateOfferModal(true)}
@@ -932,22 +932,25 @@ function CompanyPageContent() {
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {offersList.map((off) => (
-                      <div key={off.id} className="bg-gray-950 border border-gray-800 p-5 rounded-xl space-y-4 flex flex-col justify-between">
+                      <div
+                        key={off.id}
+                        className="bg-slate-800/90 hover:bg-slate-800 border border-slate-600/80 hover:border-slate-500 p-5 rounded-xl space-y-4 flex flex-col justify-between shadow-md transition-all"
+                      >
                         <div className="space-y-2">
                           <div className="flex justify-between items-start">
-                            <span className="px-2.5 py-1 bg-gray-900 text-[#FF5500] border border-gray-800 font-mono text-xs font-bold rounded-lg uppercase">
+                            <span className="px-2.5 py-1 bg-gray-950 text-[#FF5500] border border-slate-700 font-mono text-xs font-bold rounded-lg uppercase">
                               {off.codice_offerta || 'OFF'}
                             </span>
-                            <span className="px-2 py-0.5 bg-emerald-950 border border-emerald-800 text-emerald-300 text-[10px] font-semibold rounded uppercase">
+                            <span className="px-2 py-0.5 bg-emerald-950 border border-emerald-700 text-emerald-300 text-[10px] font-semibold rounded uppercase">
                               {off.stato || 'Bozza'}
                             </span>
                           </div>
                           <h4 className="text-sm font-bold text-white uppercase">{off.titolo}</h4>
-                          <p className="text-xs text-gray-400 line-clamp-2">{off.descrizione || 'Nessuna descrizione inserita.'}</p>
+                          <p className="text-xs text-slate-300 line-clamp-2">{off.descrizione || 'Nessuna descrizione inserita.'}</p>
                         </div>
 
-                        <div className="pt-3 border-t border-gray-900 flex justify-between items-center">
-                          <span className="text-[10px] font-mono text-gray-500">
+                        <div className="pt-3 border-t border-slate-700/80 flex justify-between items-center">
+                          <span className="text-[10px] font-mono text-slate-400">
                             Creato il: {new Date(off.created_at || Date.now()).toLocaleDateString()}
                           </span>
                           <button
@@ -955,7 +958,7 @@ function CompanyPageContent() {
                               setActiveOffer(off);
                               setSelectedCompanyModules(Array.isArray(off.moduli) ? off.moduli : []);
                             }}
-                            className="px-4 py-2 bg-gray-900 hover:bg-gray-800 text-white font-bold rounded-xl border border-gray-800 transition-all text-xs cursor-pointer"
+                            className="px-4 py-2 bg-gray-950 hover:bg-gray-900 text-white font-bold rounded-xl border border-slate-600 transition-all text-xs cursor-pointer"
                           >
                             Apri Composizione -&gt;
                           </button>
