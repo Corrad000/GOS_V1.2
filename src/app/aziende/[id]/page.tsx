@@ -16,6 +16,7 @@ import {
   type VoceRegistro,
   type FaseTrattativa,
   type StatoTrattativa,
+  type ModificaTrattativaPayload,
 } from '@/modules/offer-builder/TrattativaSchedaView';
 import { generateGlobalActivityCode } from '@/utils/codeGenerator';
 
@@ -288,6 +289,46 @@ function CompanyPageContent() {
     setActiveTrattativa((prev: any) =>
       prev && prev.id === trattativaId ? { ...prev, ...patch } : prev
     );
+  };
+
+  const handleModificaTrattativa = async (
+    trattativaId: string,
+    payload: ModificaTrattativaPayload
+  ) => {
+    const nowIso = new Date().toISOString();
+    const chiusuraIso = payload.chiusuraPrevista
+      ? new Date(payload.chiusuraPrevista).toISOString()
+      : null;
+
+    const updateDbPayload = {
+      titolo: payload.nome,
+      valore: payload.valore,
+      probabilita: payload.probabilita,
+      codice_offerta: payload.codiceOfferta ?? null,
+      chiusura_prevista: chiusuraIso,
+      ultima_modifica: nowIso,
+    };
+
+    const { error } = await supabase
+      .from('gos_trattative')
+      .update(updateDbPayload)
+      .eq('id', trattativaId);
+
+    if (error) {
+      alert('Errore salvataggio trattativa su Supabase: ' + error.message);
+      throw new Error(error.message);
+    }
+
+    syncTrattativaLocal(trattativaId, updateDbPayload);
+
+    appendRegistro(trattativaId, {
+      id: `reg-edit-${Date.now()}`,
+      quando: nowIso,
+      autore: companyData.advisor_nome || 'Advisor',
+      azione: 'Modifica dati trattativa',
+      daStato: activeTrattativa?.titolo || 'Trattativa',
+      aStato: `${payload.nome} · ${Math.round(payload.valore).toLocaleString('it-IT')} € (${Math.round(payload.probabilita * 100)}%)`,
+    });
   };
 
   const handleCreateBusinessPlan = async (e: React.FormEvent) => {
@@ -1172,6 +1213,9 @@ function CompanyPageContent() {
                 }
                 onCambiaFase={(nuovaFase) =>
                   handleChangeTrattativaFase(activeTrattativa.id, nuovaFase)
+                }
+                onModificaTrattativa={(payload) =>
+                  handleModificaTrattativa(activeTrattativa.id, payload)
                 }
               />
             )}

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
 export type StatoAzione = 'scaduta' | 'oggi' | 'programmata' | 'senza_azione';
 export type FaseTrattativa = 'lead' | 'qualifica' | 'proposta' | 'negoziazione' | 'chiusura';
@@ -81,6 +81,14 @@ export interface DatiSchedaTrattativa {
   contatti: ContattoTrattativa[];
 }
 
+export interface ModificaTrattativaPayload {
+  nome: string;
+  valore: number;
+  probabilita: number;
+  codiceOfferta?: string;
+  chiusuraPrevista?: string;
+}
+
 export interface SchedaTrattativaProps {
   dati: DatiSchedaTrattativa;
   onTornaAzienda: () => void;
@@ -99,6 +107,7 @@ export interface SchedaTrattativaProps {
   onCambiaStato: (nuovoStato: StatoTrattativa) => Promise<void> | void;
   onCambiaFase?: (nuovaFase: FaseTrattativa) => Promise<void> | void;
   onApriOfferta?: (codiceOfferta: string) => void;
+  onModificaTrattativa?: (payload: ModificaTrattativaPayload) => Promise<void> | void;
 }
 
 const FASI: { id: FaseTrattativa; label: string; probDefault: number }[] = [
@@ -154,6 +163,14 @@ function formatDataOra(iso?: string): string {
   })}`;
 }
 
+function toDateInputValue(iso?: string): string {
+  if (!iso) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toISOString().slice(0, 10);
+}
+
 export const SchedaTrattativa: React.FC<SchedaTrattativaProps> = ({
   dati,
   onTornaAzienda,
@@ -164,14 +181,20 @@ export const SchedaTrattativa: React.FC<SchedaTrattativaProps> = ({
   onCambiaStato,
   onCambiaFase,
   onApriOfferta,
+  onModificaTrattativa,
 }) => {
-  const { trattativa, timeline, registro, offerte, contatti } = dati;
+  const { timeline, registro, offerte, contatti } = dati;
+  const [trattativaLocale, setTrattativaLocale] = useState<TrattativaDettaglio>(dati.trattativa);
 
-  const faseCorrente = normalizzaFase(trattativa.fase);
-  const statoCorrente = normalizzaStato(trattativa.statoTrattativa);
+  useEffect(() => {
+    setTrattativaLocale(dati.trattativa);
+  }, [dati.trattativa]);
+
+  const faseCorrente = normalizzaFase(trattativaLocale.fase);
+  const statoCorrente = normalizzaStato(trattativaLocale.statoTrattativa);
 
   const [tabAttivo, setTabAttivo] = useState<'timeline' | 'registro' | 'offerte' | 'contatti'>('timeline');
-  const [modalTipo, setModalTipo] = useState<'attivita' | 'followup' | null>(null);
+  const [modalTipo, setModalTipo] = useState<'attivita' | 'followup' | 'modifica' | null>(null);
 
   const [attivitaTipo, setAttivitaTipo] = useState<EventoTimeline['tipo']>('chiamata');
   const [attivitaTitolo, setAttivitaTitolo] = useState('');
@@ -184,15 +207,83 @@ export const SchedaTrattativa: React.FC<SchedaTrattativaProps> = ({
   const [savingFollowup, setSavingFollowup] = useState(false);
   const [completingAction, setCompletingAction] = useState(false);
 
-  const valorePesato = Math.round(trattativa.valore * trattativa.probabilita);
-  const probabilitaPct = Math.round(trattativa.probabilita * 100);
+  const [editNome, setEditNome] = useState(trattativaLocale.nome);
+  const [editValore, setEditValore] = useState(String(trattativaLocale.valore ?? 0));
+  const [editProbabilitaPct, setEditProbabilitaPct] = useState(
+    String(Math.round((trattativaLocale.probabilita ?? 0) * 100))
+  );
+  const [editCodiceOfferta, setEditCodiceOfferta] = useState(trattativaLocale.codiceOfferta ?? '');
+  const [editChiusuraPrevista, setEditChiusuraPrevista] = useState(
+    toDateInputValue(trattativaLocale.chiusuraPrevista)
+  );
+  const [savingModifica, setSavingModifica] = useState(false);
+  const [erroreModifica, setErroreModifica] = useState<string | null>(null);
+
+  const valorePesato = Math.round(trattativaLocale.valore * trattativaLocale.probabilita);
+  const probabilitaPct = Math.round(trattativaLocale.probabilita * 100);
 
   const haAzioneDaFare = Boolean(
-    trattativa.azioneProgrammata ||
-      (trattativa.azioneNecessaria &&
-        trattativa.azioneNecessaria.trim() !== '' &&
-        trattativa.azioneNecessaria.toLowerCase() !== 'nessuna azione da fare')
+    trattativaLocale.azioneProgrammata ||
+      (trattativaLocale.azioneNecessaria &&
+        trattativaLocale.azioneNecessaria.trim() !== '' &&
+        trattativaLocale.azioneNecessaria.toLowerCase() !== 'nessuna azione da fare')
   );
+
+  const apriModaleModifica = () => {
+    setErroreModifica(null);
+    setEditNome(trattativaLocale.nome);
+    setEditValore(String(trattativaLocale.valore ?? 0));
+    setEditProbabilitaPct(String(Math.round((trattativaLocale.probabilita ?? 0) * 100)));
+    setEditCodiceOfferta(trattativaLocale.codiceOfferta ?? '');
+    setEditChiusuraPrevista(toDateInputValue(trattativaLocale.chiusuraPrevista));
+    setModalTipo('modifica');
+  };
+
+  const handleSubmitModifica = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editNome.trim() || savingModifica) return;
+
+    setErroreModifica(null);
+    const valoreNum = Number(editValore.replace(',', '.'));
+    const probNum = Number(editProbabilitaPct.replace(',', '.'));
+    const probNormalizzata = Number.isNaN(probNum)
+      ? trattativaLocale.probabilita
+      : Math.min(1, Math.max(0, probNum / 100));
+
+    const payload: ModificaTrattativaPayload = {
+      nome: editNome.trim(),
+      valore: Number.isNaN(valoreNum) ? trattativaLocale.valore : Math.max(0, valoreNum),
+      probabilita: probNormalizzata,
+      codiceOfferta: editCodiceOfferta.trim() || undefined,
+      chiusuraPrevista: editChiusuraPrevista || undefined,
+    };
+
+    const adessoIso = new Date().toISOString();
+
+    setSavingModifica(true);
+    try {
+      if (onModificaTrattativa) {
+        await onModificaTrattativa(payload);
+      }
+
+      setTrattativaLocale((prev) => ({
+        ...prev,
+        nome: payload.nome,
+        valore: payload.valore,
+        probabilita: payload.probabilita,
+        codiceOfferta: payload.codiceOfferta,
+        chiusuraPrevista: payload.chiusuraPrevista,
+        ultimaModifica: adessoIso,
+      }));
+      setModalTipo(null);
+    } catch (err) {
+      setErroreModifica(
+        err instanceof Error ? err.message : 'Errore durante il salvataggio.'
+      );
+    } finally {
+      setSavingModifica(false);
+    }
+  };
 
   const handleSubmitAttivita = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -253,14 +344,14 @@ export const SchedaTrattativa: React.FC<SchedaTrattativaProps> = ({
           </button>
           <span className="text-gray-600">/</span>
           <button type="button" onClick={onTornaAzienda} className="hover:text-white transition cursor-pointer">
-            {trattativa.azienda.nome}
+            {trattativaLocale.azienda.nome}
           </button>
           <span className="text-gray-600">/</span>
           <button type="button" onClick={onTornaAzienda} className="hover:text-white transition cursor-pointer">
             Trattative
           </button>
           <span className="text-gray-600">/</span>
-          <span className="text-[#FF5500] font-semibold">{trattativa.nome}</span>
+          <span className="text-[#FF5500] font-semibold">{trattativaLocale.nome}</span>
         </nav>
 
         <button
@@ -277,27 +368,34 @@ export const SchedaTrattativa: React.FC<SchedaTrattativaProps> = ({
         <div className="space-y-1.5">
           <div className="flex flex-wrap items-center gap-2.5">
             <h2 className="text-2xl font-extrabold tracking-tight text-white">
-              {trattativa.nome}
+              {trattativaLocale.nome}
             </h2>
             <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wider bg-[#FF5500]/20 text-[#FF8547] border border-[#FF5500]/50">
               {faseCorrente}
             </span>
+            <button
+              type="button"
+              onClick={apriModaleModifica}
+              className="px-3 py-1 rounded-lg text-xs font-bold bg-gray-900 hover:bg-gray-800 text-gray-100 border border-gray-700 transition cursor-pointer"
+            >
+              ✎ Modifica trattativa
+            </button>
           </div>
           <div className="flex flex-wrap items-center gap-2 text-xs text-gray-300">
-            <span>{trattativa.azienda.nome}</span>
-            {trattativa.codiceOfferta && (
+            <span>{trattativaLocale.azienda.nome}</span>
+            {trattativaLocale.codiceOfferta && (
               <>
                 <span className="text-gray-600">·</span>
                 <span className="font-mono text-emerald-400 font-semibold">
-                  Offerta {trattativa.codiceOfferta}
+                  Offerta {trattativaLocale.codiceOfferta}
                 </span>
               </>
             )}
-            {trattativa.chiusuraPrevista && (
+            {trattativaLocale.chiusuraPrevista && (
               <>
                 <span className="text-gray-600">·</span>
                 <span className="text-gray-400">
-                  Chiusura prevista {formatDataBreve(trattativa.chiusuraPrevista)}
+                  Chiusura prevista {formatDataBreve(trattativaLocale.chiusuraPrevista)}
                 </span>
               </>
             )}
@@ -638,7 +736,7 @@ export const SchedaTrattativa: React.FC<SchedaTrattativaProps> = ({
               Valore trattativa
             </p>
             <p className="text-3xl font-extrabold font-mono text-white">
-              {formatEuro(trattativa.valore)}
+              {formatEuro(trattativaLocale.valore)}
             </p>
             <p className="text-xs text-emerald-400 font-mono">
               Probabilità {probabilitaPct}% · ponderato {formatEuro(valorePesato)}
@@ -652,15 +750,15 @@ export const SchedaTrattativa: React.FC<SchedaTrattativaProps> = ({
               </p>
               <span
                 className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${
-                  trattativa.azioneProgrammata
+                  trattativaLocale.azioneProgrammata
                     ? 'bg-amber-950/80 text-amber-300 border-amber-700/60'
                     : haAzioneDaFare
                       ? 'bg-sky-950/80 text-sky-300 border-sky-700/60'
                       : 'bg-gray-950 text-gray-500 border-gray-800'
                 }`}
               >
-                {trattativa.azioneProgrammata
-                  ? formatDataOra(trattativa.azioneProgrammata.data)
+                {trattativaLocale.azioneProgrammata
+                  ? formatDataOra(trattativaLocale.azioneProgrammata.data)
                   : haAzioneDaFare
                     ? 'In corso'
                     : 'Completata'}
@@ -669,15 +767,15 @@ export const SchedaTrattativa: React.FC<SchedaTrattativaProps> = ({
 
             <p className="text-sm font-bold text-white">
               {haAzioneDaFare
-                ? trattativa.azioneProgrammata?.titolo || trattativa.azioneNecessaria
+                ? trattativaLocale.azioneProgrammata?.titolo || trattativaLocale.azioneNecessaria
                 : 'Nessuna azione pendente'}
             </p>
 
             <p className="text-xs text-gray-400">
-              {trattativa.azioneProgrammata
-                ? `Follow-up fissato per ${formatDataOra(trattativa.azioneProgrammata.data)}`
+              {trattativaLocale.azioneProgrammata
+                ? `Follow-up fissato per ${formatDataOra(trattativaLocale.azioneProgrammata.data)}`
                 : haAzioneDaFare
-                  ? trattativa.azioneNecessaria
+                  ? trattativaLocale.azioneNecessaria
                   : 'Usa "Registra attività" o "Programma follow-up" per impostare la prossima azione.'}
             </p>
 
@@ -696,10 +794,128 @@ export const SchedaTrattativa: React.FC<SchedaTrattativaProps> = ({
           </div>
 
           <div className="pt-2 border-t border-gray-800/80 text-xs text-gray-500">
-            Ultima modifica {formatDataOra(trattativa.ultimaModifica)}
+            Ultima modifica {formatDataOra(trattativaLocale.ultimaModifica)}
           </div>
         </aside>
       </div>
+
+      {/* Modale Modifica Trattativa */}
+      {modalTipo === 'modifica' && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-gray-900 border border-gray-700 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-gray-800 pb-3">
+              <h3 className="text-sm font-extrabold uppercase tracking-wider text-white">
+                Modifica Trattativa — {trattativaLocale.nome}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setModalTipo(null)}
+                className="text-gray-400 hover:text-white text-sm font-bold cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmitModifica} className="space-y-3.5 text-xs">
+              <div>
+                <label className="block text-[10px] font-bold uppercase text-gray-400 mb-1">
+                  Nome trattativa
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={editNome}
+                  onChange={(e) => setEditNome(e.target.value)}
+                  className="w-full bg-gray-950 border border-gray-700 px-3 py-2 rounded-xl text-white focus:outline-none focus:border-[#FF5500]"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[10px] font-bold uppercase text-gray-400 mb-1">
+                    Valore (€)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="any"
+                    required
+                    value={editValore}
+                    onChange={(e) => setEditValore(e.target.value)}
+                    className="w-full bg-gray-950 border border-gray-700 px-3 py-2 rounded-xl text-white font-mono focus:outline-none focus:border-[#FF5500]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold uppercase text-gray-400 mb-1">
+                    Probabilità (%)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="1"
+                    required
+                    value={editProbabilitaPct}
+                    onChange={(e) => setEditProbabilitaPct(e.target.value)}
+                    className="w-full bg-gray-950 border border-gray-700 px-3 py-2 rounded-xl text-white font-mono focus:outline-none focus:border-[#FF5500]"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[10px] font-bold uppercase text-gray-400 mb-1">
+                    Codice offerta (opzionale)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Es. FCO-0001"
+                    value={editCodiceOfferta}
+                    onChange={(e) => setEditCodiceOfferta(e.target.value)}
+                    className="w-full bg-gray-950 border border-gray-700 px-3 py-2 rounded-xl text-white font-mono focus:outline-none focus:border-[#FF5500]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold uppercase text-gray-400 mb-1">
+                    Chiusura prevista
+                  </label>
+                  <input
+                    type="date"
+                    value={editChiusuraPrevista}
+                    onChange={(e) => setEditChiusuraPrevista(e.target.value)}
+                    className="w-full bg-gray-950 border border-gray-700 px-3 py-2 rounded-xl text-white focus:outline-none focus:border-[#FF5500]"
+                  />
+                </div>
+              </div>
+
+              {erroreModifica && (
+                <div className="p-2.5 rounded-xl bg-rose-950/70 border border-rose-700/60 text-rose-300 text-xs">
+                  {erroreModifica}
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2.5 pt-3 border-t border-gray-800">
+                <button
+                  type="button"
+                  onClick={() => setModalTipo(null)}
+                  className="px-4 py-2 rounded-xl bg-gray-800 hover:bg-gray-700 text-gray-300 font-bold cursor-pointer"
+                >
+                  Annulla
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingModifica}
+                  className="px-4 py-2 rounded-xl bg-[#FF5500] hover:bg-orange-600 text-white font-bold cursor-pointer disabled:opacity-50"
+                >
+                  {savingModifica ? 'Salvataggio...' : 'Salva modifiche'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Modale Registra Attività */}
       {modalTipo === 'attivita' && (
@@ -707,7 +923,7 @@ export const SchedaTrattativa: React.FC<SchedaTrattativaProps> = ({
           <div className="bg-gray-900 border border-gray-700 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl">
             <div className="flex items-center justify-between border-b border-gray-800 pb-3">
               <h3 className="text-sm font-extrabold uppercase tracking-wider text-white">
-                Registra Attività — {trattativa.nome}
+                Registra Attività — {trattativaLocale.nome}
               </h3>
               <button
                 type="button"
@@ -803,7 +1019,7 @@ export const SchedaTrattativa: React.FC<SchedaTrattativaProps> = ({
           <div className="bg-gray-900 border border-gray-700 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl">
             <div className="flex items-center justify-between border-b border-gray-800 pb-3">
               <h3 className="text-sm font-extrabold uppercase tracking-wider text-white">
-                Programma Follow-up — {trattativa.nome}
+                Programma Follow-up — {trattativaLocale.nome}
               </h3>
               <button
                 type="button"
