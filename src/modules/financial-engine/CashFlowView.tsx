@@ -57,11 +57,17 @@ export function CashFlowView({ cashFlowRows = [] }: CashFlowProps) {
                       {row.label}
                     </td>
                     {row.values.map((val, yIdx) => {
-                      const formattedVal = Math.round(val).toLocaleString();
-                      const textCol = row.colorClass || (row.isNegative ? 'text-red-400' : 'text-white');
+                      const numVal = Number(val) || 0;
+                      const isValNegative = numVal < 0;
+                      const formattedVal = Math.round(Math.abs(numVal)).toLocaleString('it-IT');
+                      const textCol = isValNegative ? 'text-red-400 font-semibold' : 'text-white';
                       return (
-                        <td key={yIdx} className={`p-4 text-center font-mono ${textCol}`}>
-                          {val < 0 ? `- € ${Math.abs(val).toLocaleString()}` : `€ ${formattedVal}`}
+                        <td
+                          key={yIdx}
+                          data-negative={isValNegative ? 'true' : undefined}
+                          className={`p-4 text-center font-mono ${textCol}`}
+                        >
+                          {isValNegative ? `- € ${formattedVal}` : `€ ${formattedVal}`}
                         </td>
                       );
                     })}

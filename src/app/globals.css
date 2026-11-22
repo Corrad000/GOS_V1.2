@@ -14,8 +14,8 @@
    ============================================================ */
 
 html, body {
-  background-color: #050B14 !important;
-  color: #FFFFFF !important;
+  background-color: #090D16;
+  color: #E6EAF2;
   font-family: var(--gos-font) !important;
   font-size: 14px;
   width: 100%;
@@ -54,12 +54,11 @@ body main,
 /* ============================================================
    TIPOGRAFIA UNIFICATA A GOOGLE SANS FLEX (Inclusi numeri e valute)
    ============================================================ */
-h1, h2, h3, h4, h5, h6, p, span, td, label, li, a, div {
+h1, h2, h3, h4, h5, h6, p, span, td, th, button, input, select, textarea, label, li, a, div {
   font-family: var(--gos-font) !important;
 }
 
-/* Forzatura specifica per numeri, valute e classi mono (es. Fatturato) */
-main .font-mono, 
+main .font-mono,
 main [class*="font-mono"],
 main .text-3xl,
 main .text-4xl,
@@ -67,53 +66,8 @@ main span[class*="text-"] {
   font-family: var(--gos-font) !important;
 }
 
-/* Testi principali e secondari */
-main h1, main h2, main h3, main h4, main h5, main h6, 
-main p, main span, main td, main label, main li {
-  color: #FFFFFF !important;
-}
-
-.text-gray-600, .text-gray-500, .text-gray-400, .text-slate-400 {
-  color: #94A3B8 !important;
-}
-
-/* ============================================================
-   GEOMETRIA E CARD (Dark Slate con bordi squadrati a 0px)
-   ============================================================ */
-div[class*="bg-white"],
-main .rounded-3xl,
-main .rounded-2xl,
-main .rounded-xl,
-main .rounded-lg,
-main div[class*="rounded"] {
-  background-color: #0F172A !important;
-  border-color: #1E293B !important;
-  border-radius: 0px !important;
-}
-
-/* Metriche e cifre verdi (es. Fatturato 2026) */
-.text-emerald-500, .text-emerald-400, .text-green-500, [class*="text-[#10B981]"], [class*="text-[#32CD32]"] {
-  color: #10B981 !important;
-}
-
-/* Pulsanti primari arancioni */
-button[class*="bg-orange"], a[class*="bg-orange"], button.bg-amber-600 {
-  background-color: #EA580C !important;
-  color: #FFFFFF !important;
-  border-radius: 0px !important;
-}
-
-/* Tabelle e intestazioni */
-th {
-  background-color: #0F172A !important;
-  color: #94A3B8 !important;
-  font-family: var(--gos-font) !important;
-  font-weight: 700 !important;
-  border-bottom: 1px solid #1E293B !important;
-  border-radius: 0px !important;
-}
-
-th * {
-  color: #94A3B8 !important;
-  font-family: var(--gos-font) !important;
+/* Valori negativi espliciti sempre in rosso */
+.text-negative,
+[data-negative="true"] {
+  color: #F87171 !important;
 }

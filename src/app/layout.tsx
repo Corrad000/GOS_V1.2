@@ -37,7 +37,7 @@ export default function RootLayout({
     <html lang="it" suppressHydrationWarning>
       <body
         suppressHydrationWarning
-        className="bg-[#050B14] text-white antialiased min-h-screen w-full overflow-x-hidden flex flex-col selection:bg-orange-600 selection:text-white"
+        className="flex min-h-screen w-full flex-col overflow-x-hidden bg-[#090D16] text-[#E6EAF2] antialiased selection:bg-[#FF5500] selection:text-white"
       >
         <Suspense fallback={children}>
           <AppShell>{children}</AppShell>

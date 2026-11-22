@@ -48,32 +48,27 @@ interface CompanyTableProps {
 const STATUS_SECTIONS: Array<{
   key: CompanyStatusModalita;
   label: string;
-  badgeBg: string;
-  badgeColor: string;
+  badgeClass: string;
 }> = [
   {
     key: 'LAVORAZIONE',
     label: 'IN LAVORAZIONE',
-    badgeBg: '#059669',
-    badgeColor: '#ffffff',
+    badgeClass: 'border-emerald-500/35 bg-emerald-500/15 text-emerald-400',
   },
   {
     key: 'FOLLOW-UP',
     label: 'FOLLOW-UP',
-    badgeBg: '#2563eb',
-    badgeColor: '#ffffff',
+    badgeClass: 'border-amber-500/35 bg-amber-500/15 text-amber-400',
   },
   {
     key: 'DATABASE',
     label: 'DATABASE',
-    badgeBg: '#d97706',
-    badgeColor: '#ffffff',
+    badgeClass: 'border-[#2A3A66] bg-[#111E42] text-[#B9C3D9]',
   },
   {
     key: 'CHIUSO',
     label: 'CHIUSO',
-    badgeBg: '#374151',
-    badgeColor: '#e5e7eb',
+    badgeClass: 'border-red-500/35 bg-red-500/15 text-red-400',
   },
 ];
 
@@ -94,6 +89,12 @@ function normalizeModalita(val?: string): CompanyStatusModalita {
   }
   return 'DATABASE';
 }
+
+const eur = new Intl.NumberFormat('it-IT', {
+  style: 'currency',
+  currency: 'EUR',
+  maximumFractionDigits: 0,
+});
 
 export function CompanyTable({
   companies,
@@ -254,24 +255,6 @@ export function CompanyTable({
     }
   };
 
-  const allFilteredSelected =
-    filteredCompanies.length > 0 &&
-    filteredCompanies.every((c) => selectedIds.includes(c.id));
-
-  const toggleSelectAll = () => {
-    if (!activePermissions.canDeleteAziende) return;
-    if (allFilteredSelected) {
-      const filteredSet = new Set(filteredCompanies.map((c) => c.id));
-      setSelectedIds((prev) => prev.filter((id) => !filteredSet.has(id)));
-    } else {
-      const merged = new Set([
-        ...selectedIds,
-        ...filteredCompanies.map((c) => c.id),
-      ]);
-      setSelectedIds(Array.from(merged));
-    }
-  };
-
   const toggleSelectOne = (id: string) => {
     if (!activePermissions.canDeleteAziende) return;
     setSelectedIds((prev) =>
@@ -341,56 +324,11 @@ export function CompanyTable({
     }
   };
 
-  const topActionStyle: React.CSSProperties = {
-    height: '32px',
-    padding: '0 14px',
-    borderRadius: '0px',
-    border: 'none',
-    fontSize: '11px',
-    fontWeight: 700,
-    textTransform: 'uppercase',
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: '6px',
-    lineHeight: 1,
-    whiteSpace: 'nowrap',
-  };
-
-  const rowActionStyle: React.CSSProperties = {
-    height: '24px',
-    padding: '0 10px',
-    borderRadius: '0px',
-    border: 'none',
-    fontSize: '10px',
-    fontWeight: 700,
-    textTransform: 'uppercase',
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    lineHeight: 1,
-    whiteSpace: 'nowrap',
-  };
-
-  const checkboxStyle: React.CSSProperties = {
-    width: '13px',
-    height: '13px',
-    minWidth: '13px',
-    minHeight: '13px',
-    margin: 0,
-    borderRadius: '0px',
-    border: '1px solid #4b5563',
-    backgroundColor: '#111827',
-    accentColor: '#dc2626',
-    verticalAlign: 'middle',
-    cursor: 'pointer',
-  };
-
   const canRegister = showRegisterButton && activePermissions.canCreateAziende;
   const canImport = showImportButton && activePermissions.canCreateAziende;
 
   return (
-    <div className="bg-gray-900 border border-gray-800 p-6 rounded-none space-y-6 shadow-xl">
+    <div className="space-y-6 rounded-2xl border border-[#1B2540] bg-[#0B132B] p-6 text-[#E6EAF2]">
       {isRegistering && activePermissions.canCreateAziende ? (
         <AnagraficaForm
           onSave={(newCompany) => {
@@ -406,22 +344,19 @@ export function CompanyTable({
         />
       ) : (
         <>
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+          <div className="flex flex-col items-start justify-between gap-4 border-b border-[#1B2540] pb-4 sm:flex-row sm:items-center">
             <div>
-              <h2 className="text-base font-black text-white uppercase tracking-wider">{title}</h2>
-              <p className="text-xs text-gray-400 mt-0.5">{subtitle}</p>
+              <h2 className="text-base font-extrabold uppercase tracking-wider text-white">
+                {title}
+              </h2>
+              <p className="mt-1 text-xs text-[#8A94A8]">{subtitle}</p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               {activePermissions.canDeleteAziende && selectedIds.length > 0 && (
                 <button
                   type="button"
                   onClick={openBulkDeleteModal}
-                  style={{
-                    ...topActionStyle,
-                    backgroundColor: '#dc2626',
-                    color: '#ffffff',
-                  }}
-                  className="hover:opacity-90 transition-all cursor-pointer"
+                  className="inline-flex h-8 cursor-pointer items-center justify-center rounded-lg border border-red-500/40 bg-red-500/15 px-3.5 text-[11px] font-bold uppercase tracking-wider text-red-300 transition-colors hover:bg-red-500/25"
                 >
                   Elimina selezionate ({selectedIds.length})
                 </button>
@@ -429,12 +364,7 @@ export function CompanyTable({
               {canImport && (
                 <Link
                   href="/commerciale/importa"
-                  style={{
-                    ...topActionStyle,
-                    backgroundColor: '#059669',
-                    color: '#ffffff',
-                  }}
-                  className="hover:opacity-90 transition-all cursor-pointer"
+                  className="inline-flex h-8 cursor-pointer items-center justify-center rounded-lg border border-[#2A3A66] bg-[#111E42] px-3.5 text-[11px] font-bold uppercase tracking-wider text-[#E6EAF2] transition-colors hover:bg-[#1B2540]"
                 >
                   ↑ Importa Aziende
                 </Link>
@@ -443,12 +373,7 @@ export function CompanyTable({
                 <button
                   type="button"
                   onClick={() => setIsRegistering(true)}
-                  style={{
-                    ...topActionStyle,
-                    backgroundColor: '#d97706',
-                    color: '#ffffff',
-                  }}
-                  className="hover:opacity-90 transition-all cursor-pointer"
+                  className="inline-flex h-8 cursor-pointer items-center justify-center rounded-lg bg-[#FF5500] px-3.5 text-[11px] font-bold uppercase tracking-wider text-white transition-colors hover:bg-[#FF7A3D]"
                 >
                   + Registra Nuova Azienda
                 </button>
@@ -456,7 +381,39 @@ export function CompanyTable({
             </div>
           </div>
 
-          {/* Pulsanti [TIPO STATUS] ([QUANTITÀ]) sopra la barra Cerca -> scroll alla sezione */}
+          {/* Barra ricerca su singola riga come riferimento */}
+          <div className="flex flex-col gap-3 border-b border-[#1B2540] pb-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-1 items-center gap-4">
+              <label
+                htmlFor="cerca-azienda-tabella"
+                className="shrink-0 text-[11px] font-semibold uppercase tracking-widest text-[#8A94A8]"
+              >
+                CERCA
+              </label>
+              <input
+                id="cerca-azienda-tabella"
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Cerca per ragione sociale, codice AZ-XXXXX, P.IVA o advisor..."
+                className="h-9 w-full rounded-lg border border-[#2A3A66] bg-[#090D16] px-3.5 text-xs text-[#E6EAF2] placeholder:text-[#5B6680] focus:border-[#FF5500] focus:outline-none"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="inline-flex h-9 shrink-0 cursor-pointer items-center justify-center rounded-lg border border-[#2A3A66] bg-[#111E42] px-3 text-[11px] font-semibold text-[#B9C3D9] hover:bg-[#1B2540] hover:text-white"
+                >
+                  Reset
+                </button>
+              )}
+            </div>
+            <span className="shrink-0 text-xs text-[#8A94A8]">
+              {filteredCompanies.length} di {items.length} aziende
+            </span>
+          </div>
+
+          {/* Pulsanti salto stato */}
           <div className="flex flex-wrap items-center gap-2">
             {STATUS_SECTIONS.map((sec) => {
               const count = countsByStatus[sec.key];
@@ -466,13 +423,11 @@ export function CompanyTable({
                   key={sec.key}
                   type="button"
                   onClick={() => handleJumpToSection(sec.key)}
-                  style={{
-                    ...topActionStyle,
-                    backgroundColor: sec.badgeBg,
-                    color: sec.badgeColor,
-                    outline: isSelected ? '2px solid #fde910' : 'none',
-                  }}
-                  className="hover:opacity-90 transition-all cursor-pointer"
+                  className={`inline-flex h-7 cursor-pointer items-center justify-center rounded-full border px-3 text-[11px] font-semibold transition-colors ${
+                    isSelected
+                      ? 'border-[#FF5500] bg-[#FF5500] text-white'
+                      : 'border-[#2A3A66] text-[#B9C3D9] hover:bg-[#111E42] hover:text-white'
+                  }`}
                 >
                   {sec.label} ({count})
                 </button>
@@ -480,81 +435,12 @@ export function CompanyTable({
             })}
           </div>
 
-          {/* Barra ricerca ad alto contrasto */}
-          <div className="bg-gray-950 border border-gray-800 rounded-none p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="flex-1 flex items-center gap-2">
-              <span
-                style={{
-                  backgroundColor: '#f59e0b',
-                  color: '#111827',
-                  borderRadius: '0px',
-                  border: 'none',
-                  height: '32px',
-                  padding: '0 12px',
-                  fontWeight: 800,
-                  fontSize: '10px',
-                  textTransform: 'uppercase',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  flexShrink: 0,
-                }}
-              >
-                Cerca
-              </span>
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Cerca per ragione sociale, codice AZ-XXXXX, P.IVA o advisor..."
-                style={{
-                  backgroundColor: '#ffffff',
-                  color: '#111827',
-                  border: '2px solid #f59e0b',
-                  borderRadius: '0px',
-                  height: '32px',
-                  padding: '0 12px',
-                  fontSize: '12px',
-                  width: '100%',
-                }}
-                className="focus:outline-none"
-              />
-              {searchQuery && (
-                <button
-                  type="button"
-                  onClick={() => setSearchQuery('')}
-                  style={{
-                    backgroundColor: '#374151',
-                    color: '#ffffff',
-                    borderRadius: '0px',
-                    border: 'none',
-                    height: '32px',
-                    padding: '0 12px',
-                    fontSize: '10px',
-                    fontWeight: 700,
-                    textTransform: 'uppercase',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    flexShrink: 0,
-                  }}
-                  className="hover:opacity-90 cursor-pointer"
-                >
-                  Reset
-                </button>
-              )}
-            </div>
-            <span className="text-[11px] font-mono text-gray-300 whitespace-nowrap">
-              {filteredCompanies.length} / {items.length} aziende
-            </span>
-          </div>
-
           {items.length === 0 ? (
-            <div className="p-12 text-center text-gray-400 text-xs">
+            <div className="border-t border-[#1B2540] py-12 text-center text-xs text-[#8A94A8]">
               Nessuna azienda trovata nel database.
             </div>
           ) : (
-            <div className="space-y-8">
+            <div className="space-y-8 pt-1">
               {STATUS_SECTIONS.map((sec) => {
                 const sectionRows = groupedByStatus[sec.key];
                 const isHighlighted = highlightedStatus === sec.key;
@@ -566,33 +452,29 @@ export function CompanyTable({
                     ref={(el) => {
                       sectionRefs.current[sec.key] = el;
                     }}
-                    className={`bg-gray-950 border rounded-none p-4 space-y-3 scroll-mt-6 transition-colors ${
-                      isHighlighted ? 'border-[#fde910]' : 'border-gray-800'
+                    className={`scroll-mt-6 space-y-3 border-t pt-4 transition-colors ${
+                      isHighlighted ? 'border-[#FF5500]' : 'border-[#1B2540]'
                     }`}
                   >
-                    <div className="flex items-center justify-between border-b border-gray-800 pb-2">
+                    <div className="flex items-center justify-between">
                       <span
-                        style={{
-                          backgroundColor: sec.badgeBg,
-                          color: sec.badgeColor,
-                        }}
-                        className="px-2.5 py-1 text-[10px] font-black uppercase tracking-wider rounded-none"
+                        className={`rounded-md border px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${sec.badgeClass}`}
                       >
                         {sec.label} ({sectionRows.length})
                       </span>
                     </div>
 
                     {sectionRows.length === 0 ? (
-                      <div className="py-6 text-center text-gray-500 text-xs">
+                      <div className="border-b border-[#151F38] py-6 text-center text-xs text-[#8A94A8]">
                         Nessuna azienda in {sec.label.toLowerCase()}.
                       </div>
                     ) : (
                       <div className="overflow-x-auto">
-                        <table className="w-full text-left text-xs text-gray-300">
-                          <thead className="bg-gray-900 uppercase text-gray-400 font-mono text-[10px] border-b border-gray-800">
-                            <tr>
+                        <table className="w-full border-collapse text-left text-[13px] text-[#E6EAF2]">
+                          <thead>
+                            <tr className="border-b border-[#1B2540] text-[11px] font-semibold uppercase tracking-widest text-[#8A94A8]">
                               {activePermissions.canDeleteAziende && (
-                                <th className="p-4 w-8">
+                                <th className="w-8 px-2 py-2.5">
                                   <input
                                     type="checkbox"
                                     checked={
@@ -616,20 +498,19 @@ export function CompanyTable({
                                       }
                                     }}
                                     aria-label={`Seleziona tutte le aziende in ${sec.label}`}
-                                    style={checkboxStyle}
-                                    className="rounded-none"
+                                    className="h-3.5 w-3.5 cursor-pointer rounded border-[#2A3A66] bg-[#090D16] accent-[#FF5500]"
                                   />
                                 </th>
                               )}
-                              <th className="p-4">Azienda / Codice</th>
-                              <th className="p-4">Advisor Assegnato</th>
-                              <th className="p-4">Fatturato Aziendale</th>
-                              <th className="p-4">Contratti Attivi</th>
-                              <th className="p-4">Stato</th>
-                              <th className="p-4 text-right">Azioni</th>
+                              <th className="px-2 py-2.5">AZIENDA / CODICE</th>
+                              <th className="px-2 py-2.5">ADVISOR ASSEGNATO</th>
+                              <th className="px-2 py-2.5 text-right">FATTURATO AZIENDALE</th>
+                              <th className="px-2 py-2.5">CONTRATTI ATTIVI</th>
+                              <th className="px-2 py-2.5">STATO</th>
+                              <th className="px-2 py-2.5 text-right">AZIONI</th>
                             </tr>
                           </thead>
-                          <tbody className="divide-y divide-gray-800">
+                          <tbody className="divide-y divide-[#151F38]">
                             {sectionRows.map((c) => {
                               const fatturatoVal = Number(
                                 c.fatturato ?? (c as any).revenue ?? 0
@@ -640,72 +521,65 @@ export function CompanyTable({
                               return (
                                 <tr
                                   key={c.id}
-                                  className="hover:bg-gray-850/50 transition-colors"
+                                  className={
+                                    isChecked
+                                      ? 'bg-[#111E42]/70 transition-colors'
+                                      : 'transition-colors hover:bg-[#111E42]/30'
+                                  }
                                 >
                                   {activePermissions.canDeleteAziende && (
-                                    <td className="p-4">
+                                    <td className="px-2 py-3.5">
                                       <input
                                         type="checkbox"
                                         checked={isChecked}
                                         onChange={() => toggleSelectOne(c.id)}
                                         aria-label={`Seleziona ${c.ragione_sociale}`}
-                                        style={checkboxStyle}
-                                        className="rounded-none"
+                                        className="h-3.5 w-3.5 cursor-pointer rounded border-[#2A3A66] bg-[#090D16] accent-[#FF5500]"
                                       />
                                     </td>
                                   )}
-                                  <td className="p-4">
-                                    <div className="font-bold text-white text-sm">
+                                  <td className="px-2 py-3.5">
+                                    <div className="font-semibold text-white">
                                       {c.ragione_sociale}
                                     </div>
-                                    <div className="text-[10px] font-mono text-amber-400">
+                                    <div className="text-[11px] text-[#8A94A8]">
                                       {c.codice_azienda || c.id}
                                     </div>
                                   </td>
-                                  <td className="p-4">
-                                    <div className="font-semibold text-white">
+                                  <td className="px-2 py-3.5">
+                                    <div className="font-medium text-white">
                                       {c.advisor_nome || 'Corrado Pinna'}
                                     </div>
-                                    <div className="text-[10px] text-gray-400">
+                                    <div className="text-[11px] text-[#8A94A8]">
                                       {c.advisor_ruolo || 'Equity Partner'}
                                     </div>
                                   </td>
-                                  <td className="p-4 font-mono font-bold text-emerald-400 text-sm">
-                                    € {fatturatoVal.toLocaleString('it-IT')}
+                                  <td className="px-2 py-3.5 text-right font-semibold text-white">
+                                    {eur.format(fatturatoVal)}
                                   </td>
-                                  <td className="p-4">
-                                    <span className="px-2.5 py-1 bg-gray-800 border border-gray-700 text-gray-200 rounded-none text-[10px] font-bold font-mono">
+                                  <td className="px-2 py-3.5">
+                                    <span className="rounded-md border border-[#2A3A66] bg-[#111E42] px-2.5 py-1 text-[10px] font-semibold text-[#B9C3D9]">
                                       {contrattiVal} Attivi
                                     </span>
                                   </td>
-                                  <td className="p-4">
-                                    <span className="px-2.5 py-1 rounded-none text-[10px] font-bold uppercase bg-emerald-950 text-emerald-300 border border-emerald-800">
+                                  <td className="px-2 py-3.5">
+                                    <span className="rounded-md border border-emerald-500/35 bg-emerald-500/15 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-emerald-400">
                                       {c.stato || 'ATTIVA'}
                                     </span>
                                   </td>
-                                  <td className="p-4 text-right">
+                                  <td className="px-2 py-3.5 text-right">
                                     <div className="inline-flex items-center gap-2">
                                       <Link
                                         href={`/aziende/${c.id}?from=${encodeURIComponent(fromPath)}`}
-                                        style={{
-                                          ...rowActionStyle,
-                                          backgroundColor: '#1f2937',
-                                          color: '#e5e7eb',
-                                        }}
-                                        className="hover:opacity-90 transition-all cursor-pointer"
+                                        className="inline-flex h-7 cursor-pointer items-center justify-center rounded-md border border-[#2A3A66] bg-[#1B2540] px-2.5 text-[11px] font-semibold text-[#E6EAF2] transition-colors hover:bg-[#25335A]"
                                       >
-                                        Dettagli
+                                        DETTAGLI
                                       </Link>
                                       {activePermissions.canDeleteAziende && (
                                         <button
                                           type="button"
                                           onClick={() => setDeleteTargets([c])}
-                                          style={{
-                                            ...rowActionStyle,
-                                            backgroundColor: '#dc2626',
-                                            color: '#ffffff',
-                                          }}
-                                          className="hover:opacity-90 transition-all cursor-pointer"
+                                          className="inline-flex h-7 cursor-pointer items-center justify-center rounded-md border border-red-500/35 bg-red-500/15 px-2.5 text-[11px] font-semibold text-red-300 transition-colors hover:bg-red-500/25"
                                         >
                                           Elimina
                                         </button>
@@ -727,27 +601,28 @@ export function CompanyTable({
         </>
       )}
 
-      {/* ALERT DI CONFERMA ELIMINAZIONE IRREVERSIBILE (SINGOLA O MULTIPLA) */}
       {activePermissions.canDeleteAziende && deleteTargets.length > 0 && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
-          <div className="bg-gray-900 border border-red-600 rounded-none max-w-md w-full p-6 space-y-4 shadow-2xl">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
+          <div className="w-full max-w-md space-y-4 rounded-2xl border border-red-500/40 bg-[#0B132B] p-6 shadow-2xl">
             <div className="space-y-2">
-              <div className="text-[11px] font-mono font-extrabold uppercase tracking-wider text-red-400">
+              <div className="text-[11px] font-bold uppercase tracking-widest text-red-400">
                 Attenzione — Azione Irreversibile
               </div>
-              <h3 className="text-base font-black text-white">
+              <h3 className="text-base font-extrabold text-white">
                 {deleteTargets.length === 1
                   ? 'Sei veramente sicuro di voler cancellare questa azienda?'
                   : `Sei veramente sicuro di voler cancellare ${deleteTargets.length} aziende?`}
               </h3>
-              <p className="text-xs text-gray-400 leading-relaxed">
-                Questa operazione è <strong className="text-red-300">irreversibile</strong> e rimuoverà definitivamente dal database:
+              <p className="text-xs leading-relaxed text-[#8A94A8]">
+                Questa operazione è{' '}
+                <strong className="text-red-300">irreversibile</strong> e rimuoverà
+                definitivamente dal database:
               </p>
-              <ul className="max-h-36 overflow-y-auto bg-gray-950 border border-gray-800 rounded-none p-2.5 space-y-1 text-xs text-white">
+              <ul className="max-h-36 space-y-1 overflow-y-auto border-y border-[#1B2540] py-2.5 text-xs text-white">
                 {deleteTargets.map((t) => (
                   <li key={t.id} className="truncate font-semibold">
                     • {t.ragione_sociale}{' '}
-                    <span className="text-[10px] font-mono text-amber-400">
+                    <span className="text-[11px] text-[#8A94A8]">
                       ({t.codice_azienda || t.id})
                     </span>
                   </li>
@@ -755,17 +630,12 @@ export function CompanyTable({
               </ul>
             </div>
 
-            <div className="flex justify-end gap-3 pt-3 border-t border-gray-800">
+            <div className="flex justify-end gap-3 pt-2">
               <button
                 type="button"
                 disabled={deleting}
                 onClick={() => setDeleteTargets([])}
-                style={{
-                  ...topActionStyle,
-                  backgroundColor: '#1f2937',
-                  color: '#d1d5db',
-                }}
-                className="hover:opacity-90 cursor-pointer"
+                className="inline-flex h-8 cursor-pointer items-center justify-center rounded-lg border border-[#2A3A66] bg-[#111E42] px-3.5 text-xs font-semibold text-[#E6EAF2] hover:bg-[#1B2540]"
               >
                 Annulla
               </button>
@@ -773,18 +643,13 @@ export function CompanyTable({
                 type="button"
                 disabled={deleting}
                 onClick={handleConfirmDelete}
-                style={{
-                  ...topActionStyle,
-                  backgroundColor: '#dc2626',
-                  color: '#ffffff',
-                }}
-                className="hover:opacity-90 disabled:opacity-50 cursor-pointer"
+                className="inline-flex h-8 cursor-pointer items-center justify-center rounded-lg bg-[#FF5500] px-3.5 text-xs font-bold text-white hover:bg-[#FF7A3D] disabled:opacity-50"
               >
                 {deleting
                   ? 'Eliminazione...'
                   : deleteTargets.length === 1
-                  ? 'Sì, cancella definitivamente'
-                  : `Sì, cancella tutte (${deleteTargets.length})`}
+                    ? 'Sì, cancella definitivamente'
+                    : `Sì, cancella tutte (${deleteTargets.length})`}
               </button>
             </div>
           </div>

@@ -63,11 +63,16 @@ export function ProfitAndLossView({ pnlRows = [], corporateTaxRate = 24 }: Profi
                       {row.label}
                     </td>
                     {row.values.map((val, yIdx) => {
-                      const formattedVal = Math.round(val).toLocaleString('it-IT');
-                      const textCol = row.colorClass || (row.isNegative ? 'text-red-400' : 'text-white');
+                      const isValNegative = Number(val) < 0;
+                      const formattedVal = Math.round(Math.abs(Number(val) || 0)).toLocaleString('it-IT');
+                      const textCol = isValNegative ? 'text-red-400 font-semibold' : 'text-white';
                       return (
-                        <td key={yIdx} className={`p-4 text-center font-mono ${textCol}`}>
-                          {val < 0 ? `- € ${Math.abs(val).toLocaleString('it-IT')}` : `€ ${formattedVal}`}
+                        <td
+                          key={yIdx}
+                          data-negative={isValNegative ? 'true' : undefined}
+                          className={`p-4 text-center font-mono ${textCol}`}
+                        >
+                          {isValNegative ? `- € ${formattedVal}` : `€ ${formattedVal}`}
                         </td>
                       );
                     })}
