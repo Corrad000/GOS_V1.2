@@ -162,10 +162,3 @@ function ActionBtn({
     </button>
   );
 }
-
-/*
- * Nota di implementazione:
- * - Tailwind colori da definire in tailwind.config: paper, ink, muted, line, accent, warn, ok.
- * - "compatta" nasconde azione e timestamp: da verificare con il venditore (vedi wireframe 02).
- * - Le date arrivano in ISO UTC; la formattazione usa il fuso del browser.
- */

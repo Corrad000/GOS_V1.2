@@ -3,11 +3,8 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { UserDashboardView } from '@/app/components/UserDashboardView';
 import { SystemActivityWidget } from '@/app/components/SystemActivityWidget';
-import {
-  RiepilogoKanbanDash,
-  type Fase,
-  type Voce,
-} from '@/app/utenti/[id]/RiepilogoKanbanDash';
+import Footer from '@/app/components/Footer';
+import type { Fase, Voce } from '@/app/utenti/[id]/RiepilogoKanbanDash';
 import type { StatoAzione } from '@/modules/offer-builder/card-trattativa';
 
 function normalizzaFaseServer(raw?: string): Fase {
@@ -59,19 +56,22 @@ export default async function AdminDashboardPage() {
   );
 
   // 1. Verifica l'utente autenticato dal server
-  const { data: { user }, error } = await supabase.auth.getUser();
+  const {
+    data: { user },
+    error,
+  } = await supabase.auth.getUser();
+
   if (error || !user) {
     redirect('/');
   }
 
-  // 2. Legge il profilo dinamico dalla tabella gos_profiles (incluso nome e ruolo esteso)
+  // 2. Legge il profilo dinamico dalla tabella gos_profiles
   const { data: profile } = await supabase
     .from('gos_profiles')
     .select('role, is_admin, email, nome')
     .eq('id', user.id)
     .single();
 
-  // Determina in modo sicuro se è admin in base a is_admin o ai vari valori possibili della colonna role
   const isAdmin =
     profile?.is_admin === true ||
     profile?.role === 'admin' ||
@@ -81,21 +81,18 @@ export default async function AdminDashboardPage() {
   const userRole = isAdmin ? 'admin' : 'user';
   const userName = profile?.nome || profile?.email || user.email || 'Utente Network';
 
-  // 3. Recupero dinamico e filtrato delle aziende dalla tabella corretta gos_aziende
+  // 3. Recupero aziende da gos_aziende
   let companiesList: any[] = [];
-
-  const query = supabase
+  const { data: fetchedCompanies, error: compError } = await supabase
     .from('gos_aziende')
     .select('*')
     .order('created_at', { ascending: false });
-
-  const { data: fetchedCompanies, error: compError } = await query;
 
   if (!compError && fetchedCompanies) {
     companiesList = fetchedCompanies;
   }
 
-  // 4. Recupero trattative da gos_trattative per il riepilogo all'ingresso
+  // 4. Recupero trattative da gos_trattative
   const aziendeMap = new Map<string, string>();
   companiesList.forEach((az: any) => {
     if (az?.id) aziendeMap.set(String(az.id), az.ragione_sociale || 'Azienda');
@@ -125,7 +122,7 @@ export default async function AdminDashboardPage() {
             },
             codiceOfferta: row.codice_offerta || undefined,
             valore: Number(row.valore || 0),
-            azioneNecessaria: row.azione_necessaria || 'Definire prossimo passo',
+            azioneNecessaria: row.azione_necessaria || 'Nessuna azione definita',
             azioneProgrammata:
               row.azione_programmata_titolo && row.azione_programmata_data
                 ? {
@@ -141,25 +138,22 @@ export default async function AdminDashboardPage() {
       : [];
 
   return (
-    <div className="min-h-screen w-full bg-gray-950 text-gray-100 p-[10px]">
-      <div className="w-full space-y-4">
-        {/* Vista principale della dashboard utente / admin */}
+    <div className="flex min-h-screen w-full flex-col justify-between bg-[#090D16] text-[#E6EAF2]">
+      <main className="w-full space-y-6">
         <UserDashboardView
+          userId={user.id}
           userRole={userRole}
           userName={userName}
           companies={companiesList}
+          trattative={trattativeList}
         />
 
-        {/* Riepilogo trattative all'ingresso tramite file di aggregazione */}
-        <RiepilogoKanbanDash
-          dati={trattativeList}
-          userId={user.id}
-          advisorName={userName}
-        />
+        <div className="mx-auto max-w-[1440px] px-5 pb-4 md:px-8">
+          <SystemActivityWidget />
+        </div>
+      </main>
 
-        {/* Widget di monitoraggio e log di sistema in tempo reale */}
-        <SystemActivityWidget />
-      </div>
+      <Footer />
     </div>
   );
 }
