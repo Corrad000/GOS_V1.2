@@ -293,14 +293,7 @@ export default function ProjectDetailView() {
           </div>
 
           <div className="flex items-center gap-3">
-            <button
-              onClick={handleDownloadPDF}
-              disabled={generatingPdf}
-              className="px-4 py-2 bg-[#FF5500] hover:bg-orange-600 text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-md disabled:opacity-50 flex items-center gap-2 uppercase tracking-wider"
-            >
-              {generatingPdf ? 'Generazione PDF...' : '📄 Scarica Report PDF'}
-            </button>
-
+        
             <button
               onClick={() => router.back()}
               className="px-4 py-2 bg-gray-900 hover:bg-gray-800 border border-gray-800 text-xs font-semibold rounded-xl text-gray-300 transition-all cursor-pointer"

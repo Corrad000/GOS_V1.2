@@ -14,6 +14,7 @@ import { KronosGanttView } from '@/modules/project-management/KronosGanttView';
 import { ProjectGovernanceView } from '@/modules/project-management/ProjectGovernanceView';
 import { StrategyEntryView, StrategyData } from '@/modules/project-management/StrategyEntryView';
 import CruscottoProgetti from '@/app/components/cruscotto-progetti';
+import { ReportTabSelectorModal, ReportTabKey } from '@/app/components/ReportTabSelectorModal';
 import { businessReportService } from '@/services/pdf/businessReportService';
 import { calculateFinancials } from '@/modules/financial-engine/financialCalculations';
 
@@ -99,6 +100,7 @@ export default function ProjectDetailView() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [generatingPdf, setGeneratingPdf] = useState(false);
+  const [isTabModalOpen, setIsTabModalOpen] = useState(false);
 
   useEffect(() => {
     setIsMounted(true);
@@ -134,7 +136,7 @@ export default function ProjectDetailView() {
 
   const [corporateTaxRate, setCorporateTaxRate] = useState<number>(15);
   const [employeeTaxRate, setEmployeeTaxRate] = useState<number>(30);
-  
+
   const [depreciation, setDepreciation] = useState(0);
   const [financialIncome, setFinancialIncome] = useState(0);
   const [financialExpenses, setFinancialExpenses] = useState(0);
@@ -337,13 +339,57 @@ export default function ProjectDetailView() {
     });
   };
 
-  const handleDownloadPDF = () => {
+  const handleOpenReportModal = () => {
+    setIsTabModalOpen(true);
+  };
+
+  const handleConfirmReportTabs = (selectedTabs: ReportTabKey[]) => {
+    setIsTabModalOpen(false);
     try {
       setGeneratingPdf(true);
+
+      const formatEuro = (v: number) => `€ ${Math.round(Number(v) || 0).toLocaleString('it-IT')}`;
+      const findRowValues = (rows: Array<{ label: string; values: number[] }>, matcher: (lbl: string) => boolean): [number, number, number, number, number] => {
+        const found = rows.find((r) => matcher((r.label || '').toLowerCase()));
+        const vals = found?.values || [0, 0, 0, 0, 0];
+        return [
+          Number(vals[0] || 0),
+          Number(vals[1] || 0),
+          Number(vals[2] || 0),
+          Number(vals[3] || 0),
+          Number(vals[4] || 0),
+        ];
+      };
+
+      const pnlList = calculatedFinancials.pnlRows || [];
+      const bsList = calculatedFinancials.balanceSheetRows || [];
+      const cfList = calculatedFinancials.cashFlowRows || [];
+
+      const ricaviVals = findRowValues(pnlList, (l) => l.includes('ricav') || l.includes('produzione'));
+      const ebitdaVals = findRowValues(pnlList, (l) => l.includes('ebitda'));
+      const utileNettoVals = findRowValues(pnlList, (l) => l.includes('utile netto') || l.includes('profitto netto'));
+      const attivoVals = findRowValues(bsList, (l) => l.includes('totale attivo'));
+      const cassaFinaleVals = findRowValues(cfList, (l) => l.includes('cassa alla fine') || l.includes('liquidità') || l.includes('cassa'));
+
+      const strategyAdvisoryRows = [
+        strategy.themeAndScope ? { titolo: 'Tema & Perimetro', dettaglio: strategy.themeAndScope } : null,
+        strategy.painPoints ? { titolo: 'Pain Points', dettaglio: strategy.painPoints } : null,
+        strategy.competitorsBenchmark ? { titolo: 'Benchmark Competitor', dettaglio: strategy.competitorsBenchmark } : null,
+        strategy.currentProductAsIs ? { titolo: 'Situazione As-Is', dettaglio: strategy.currentProductAsIs } : null,
+        strategy.ourProposedStrategy ? { titolo: 'Strategia Proposta', dettaglio: strategy.ourProposedStrategy } : null,
+      ].filter((item): item is { titolo: string; dettaglio: string } => item !== null);
+
+      const financialInputRows = [
+        { driver: 'Aliquota Imposte Società', valore: `${corporateTaxRate}%` },
+        { driver: 'DSO / DIO / DPO', valore: `${dso} / ${dio} / ${dpo} gg` },
+        { driver: 'Ammortamenti Configurati', valore: formatEuro(depreciation) },
+        { driver: 'Oneri Finanziari', valore: formatEuro(financialExpenses) },
+      ];
+
       const bpData = {
         kpis: calculatedFinancials.kpiRows.map(k => ({
           label: k.label,
-          value: k.isCurrency ? `€ ${Math.round(k.values[4] || 0).toLocaleString('it-IT')}` : `${k.values[4]?.toFixed(1)}%`,
+          value: k.isCurrency ? formatEuro(k.values[4] || 0) : `${k.values[4]?.toFixed(1)}%`,
           variance: 'Target Quinquennale'
         })),
         balanceSheet: calculatedFinancials.balanceSheetRows.map(row => [
@@ -360,18 +406,60 @@ export default function ProjectDetailView() {
         ]),
         loansSummary: loans.map(l => ({
           name: l.name,
-          principal: `€ ${l.principal.toLocaleString('it-IT')}`,
+          principal: formatEuro(l.principal),
           rate: `${l.interestRate}%`,
           duration: `${l.durationYears} Anni`
         })),
-        debtSchedule: calculateDebtScheduleForPDF()
+        debtSchedule: calculateDebtScheduleForPDF(),
+        strategyAdvisory: strategyAdvisoryRows,
+        financialInputs: financialInputRows,
+        cruscotto: {
+          summaryCards: [
+            { titolo: 'Ricavi (Anno 5)', valore: formatEuro(ricaviVals[4]), nota: 'Target fine piano' },
+            { titolo: 'Utile Netto (Anno 5)', valore: formatEuro(utileNettoVals[4]), nota: 'Risultato netto annuale' },
+            { titolo: 'Liquidità Finale (Cassa)', valore: formatEuro(cassaFinaleVals[4]), nota: 'Cash flow cumulatato' },
+            { titolo: 'Totale Attivo (Patrimonio)', valore: formatEuro(attivoVals[4]), nota: 'Stato Patrimoniale Anno 5' },
+          ],
+          flowsSeries: [
+            {
+              serie: 'Valore della Produzione (Ricavi)',
+              anno1: formatEuro(ricaviVals[0]),
+              anno2: formatEuro(ricaviVals[1]),
+              anno3: formatEuro(ricaviVals[2]),
+              anno4: formatEuro(ricaviVals[3]),
+              anno5: formatEuro(ricaviVals[4]),
+            },
+            {
+              serie: 'EBITDA',
+              anno1: formatEuro(ebitdaVals[0]),
+              anno2: formatEuro(ebitdaVals[1]),
+              anno3: formatEuro(ebitdaVals[2]),
+              anno4: formatEuro(ebitdaVals[3]),
+              anno5: formatEuro(ebitdaVals[4]),
+            },
+            {
+              serie: 'Utile Netto',
+              anno1: formatEuro(utileNettoVals[0]),
+              anno2: formatEuro(utileNettoVals[1]),
+              anno3: formatEuro(utileNettoVals[2]),
+              anno4: formatEuro(utileNettoVals[3]),
+              anno5: formatEuro(utileNettoVals[4]),
+            },
+          ],
+          kpiIndicators: calculatedFinancials.kpiRows.map((k) => ({
+            indicatore: k.label,
+            valoreAnno5: k.isCurrency ? formatEuro(k.values[4] || 0) : `${k.values[4]?.toFixed(1)}%`,
+            note: 'Target Anno 5',
+          })),
+        },
       };
 
       businessReportService.printBusinessPlanReport(
         bpData,
         projectData.titolo || 'Azienda Cliente',
         projectData.codice_progetto || projectId || 'PRJ-001',
-        'Corrado Pinna (Advisor)'
+        'Corrado Pinna (Advisor)',
+        { selectedTabs }
       );
     } catch (err) {
       console.error('Errore PDF:', err);
@@ -388,8 +476,7 @@ export default function ProjectDetailView() {
   return (
     <main className="min-h-screen bg-gray-950 text-gray-100 font-sans p-6 md:p-10 space-y-8">
       <div className="max-w-7xl mx-auto space-y-8">
-        
-        {/* INTESTAZIONE & AZIONI */}
+
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-gray-800 pb-6">
           <div className="space-y-2">
             <div className="flex items-center gap-3">
@@ -409,7 +496,7 @@ export default function ProjectDetailView() {
 
           <div className="flex items-center gap-3">
             <button
-              onClick={handleDownloadPDF}
+              onClick={handleOpenReportModal}
               disabled={generatingPdf}
               className="px-4 py-2 bg-[#FF5500] hover:bg-orange-600 text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-md disabled:opacity-50 flex items-center gap-2 uppercase tracking-wider"
             >
@@ -425,7 +512,6 @@ export default function ProjectDetailView() {
           </div>
         </div>
 
-        {/* BARRA DEI TAB */}
         <div className="flex flex-wrap gap-6 border-b border-gray-800 pb-4 text-sm font-semibold">
           <button
             onClick={() => setActiveTab('strategy')}
@@ -495,7 +581,6 @@ export default function ProjectDetailView() {
           </button>
         </div>
 
-        {/* CONTENUTO TAB */}
         {activeTab === 'strategy' && (
           <StrategyEntryView
             strategy={strategy}
@@ -600,6 +685,13 @@ export default function ProjectDetailView() {
             />
           </div>
         )}
+
+        <ReportTabSelectorModal
+          isOpen={isTabModalOpen}
+          onClose={() => setIsTabModalOpen(false)}
+          onConfirm={handleConfirmReportTabs}
+          isGenerating={generatingPdf}
+        />
 
       </div>
     </main>
