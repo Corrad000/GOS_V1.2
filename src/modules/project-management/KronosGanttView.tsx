@@ -3,9 +3,12 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { createBrowserClient } from '@supabase/ssr';
 import { ganttService, GanttItem } from '@/services/ganttService';
+import { kronosPdfService } from '@/services/pdf/kronosPdfService';
 
 interface KronosGanttProps {
   projectId: string;
+  projectTitle?: string;
+  projectCode?: string;
   forceClientMode?: boolean;
 }
 
@@ -49,7 +52,12 @@ const getIsoWeekNumber = (d: Date) => {
   return Math.ceil(((target.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
 };
 
-export function KronosGanttView({ projectId, forceClientMode = false }: KronosGanttProps) {
+export function KronosGanttView({
+  projectId,
+  projectTitle,
+  projectCode,
+  forceClientMode = false,
+}: KronosGanttProps) {
   const [items, setItems] = useState<GanttItem[]>([]);
   const [projectRoles, setProjectRoles] = useState<ProjectRole[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -178,6 +186,23 @@ export function KronosGanttView({ projectId, forceClientMode = false }: KronosGa
   const criticalTasksCount = operationalItems.filter((i) => i.crit).length;
   const completedTasksCount = operationalItems.filter((i) => i.end_date && i.end_date < todayIso).length;
   const progressPercentage = totalTasksCount > 0 ? Math.round((completedTasksCount / totalTasksCount) * 100) : 0;
+
+  const handlePrintPdf = () => {
+    kronosPdfService.printKronosGantt({
+      projectTitle: projectTitle || `Progetto ${projectId}`,
+      projectCode: projectCode || projectId,
+      advisorName: 'Corrado Pinna (Advisor)',
+      statusBadge,
+      items,
+      wbsMap,
+      stats: {
+        totalTasks: totalTasksCount,
+        criticalTasks: criticalTasksCount,
+        completedTasks: completedTasksCount,
+        progressPct: progressPercentage,
+      },
+    });
+  };
 
   const monthSpans = useMemo(() => {
     if (dayList.length === 0) return [];
@@ -453,7 +478,8 @@ export function KronosGanttView({ projectId, forceClientMode = false }: KronosGa
             </button>
 
             <button
-              onClick={() => window.print()}
+              type="button"
+              onClick={handlePrintPdf}
               className="px-3 py-1.5 bg-[#1b212a] hover:bg-[#222a36] text-[#e8ecf2] border border-[#2a313c] rounded-xl text-xs font-bold transition-all cursor-pointer"
             >
               Stampa / PDF

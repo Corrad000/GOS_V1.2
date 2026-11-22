@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
 import { ganttService, GanttItem } from '@/services/ganttService';
+import { kronosPdfService } from '@/services/pdf/kronosPdfService';
 
 const HOLIDAYS = ['2026-12-08', '2026-12-25', '2026-12-26', '2027-01-01'];
 const WEEK = ['D', 'L', 'M', 'M', 'G', 'V', 'S'];
@@ -45,6 +46,7 @@ export default function PublicClientKronosPage() {
 
   const [projectTitle, setProjectTitle] = useState<string>('Cronoprogramma Operativo');
   const [projectCode, setProjectCode] = useState<string>('');
+  const [statusBadge, setStatusBadge] = useState<string>('Vista Cliente – Cronoprogramma Condiviso');
   const [items, setItems] = useState<GanttItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -83,13 +85,16 @@ export default function PublicClientKronosPage() {
     setErrorMsg(null);
     try {
       const [projRes, ganttData] = await Promise.all([
-        supabase.from('gos_progetti').select('titolo, codice_progetto').eq('id', projectId).single(),
+        supabase.from('gos_progetti').select('titolo, codice_progetto, stato_piano').eq('id', projectId).single(),
         ganttService.getGanttItemsByProject(projectId),
       ]);
 
       if (projRes.data) {
         setProjectTitle(projRes.data.titolo || 'Cronoprogramma Operativo');
         setProjectCode(projRes.data.codice_progetto || '');
+        if (projRes.data.stato_piano) {
+          setStatusBadge(projRes.data.stato_piano);
+        }
       }
       setItems(ganttData);
     } catch (err: any) {
@@ -134,6 +139,29 @@ export default function PublicClientKronosPage() {
       ? Array.from({ length: totalDays }, (_, i) => toIso(addDays(parseDate(minDate), i)))
       : [];
   const todayIso = toIso(new Date());
+
+  const operationalItems = items.filter((i) => i.type !== 'grp');
+  const totalTasksCount = operationalItems.length;
+  const criticalTasksCount = operationalItems.filter((i) => i.crit).length;
+  const completedTasksCount = operationalItems.filter((i) => i.end_date && i.end_date < todayIso).length;
+  const progressPercentage = totalTasksCount > 0 ? Math.round((completedTasksCount / totalTasksCount) * 100) : 0;
+
+  const handlePrintPdf = () => {
+    kronosPdfService.printKronosGantt({
+      projectTitle,
+      projectCode: projectCode || projectId,
+      advisorName: 'Corrado Pinna (Advisor)',
+      statusBadge,
+      items,
+      wbsMap,
+      stats: {
+        totalTasks: totalTasksCount,
+        criticalTasks: criticalTasksCount,
+        completedTasks: completedTasksCount,
+        progressPct: progressPercentage,
+      },
+    });
+  };
 
   const monthSpans = useMemo(() => {
     if (dayList.length === 0) return [];
@@ -200,7 +228,7 @@ export default function PublicClientKronosPage() {
 
           <button
             type="button"
-            onClick={() => window.print()}
+            onClick={handlePrintPdf}
             className="px-4 py-2 bg-[#1b212a] hover:bg-[#222a36] text-[#e8ecf2] border border-[#2a313c] rounded-xl text-xs font-bold transition-all cursor-pointer self-start md:self-auto"
           >
             Stampa / PDF

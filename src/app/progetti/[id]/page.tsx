@@ -4,10 +4,10 @@ import { useState, useEffect, useMemo } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
 import { FinancialInputView, ProductItem, DynamicCostItem, CommissionItem, BonusItem } from '@/modules/financial-engine/FinancialInputView';
-import { KeyMetricsView, KpiRowData } from '@/modules/financial-engine/KeyMetricsView';
+import { KeyMetricsView } from '@/modules/financial-engine/KeyMetricsView';
 import { KpiGuideView } from '@/modules/financial-engine/KpiGuideView';
-import { ProfitAndLossView, PnLRowData } from '@/modules/financial-engine/ProfitAndLossView';
-import { CashFlowView, CashFlowRowData } from '@/modules/financial-engine/CashFlowView';
+import { ProfitAndLossView } from '@/modules/financial-engine/ProfitAndLossView';
+import { CashFlowView } from '@/modules/financial-engine/CashFlowView';
 import { DebtPlanView, LoanItem } from '@/modules/financial-engine/DebtPlanView';
 import { TaskScheduleView } from '@/modules/project-management/TaskScheduleView';
 import { KronosGanttView } from '@/modules/project-management/KronosGanttView';
@@ -97,7 +97,6 @@ export default function ProjectDetailView() {
 
   const [activeTab, setActiveTab] = useState<'strategy' | 'input' | 'metrics' | 'pl' | 'cashflow' | 'bs' | 'debt' | 'tasks' | 'kronos' | 'ruoli' | 'cruscotto'>('strategy');
   const [isMounted, setIsMounted] = useState(false);
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [generatingPdf, setGeneratingPdf] = useState(false);
   const [isTabModalOpen, setIsTabModalOpen] = useState(false);
@@ -152,7 +151,6 @@ export default function ProjectDetailView() {
     if (!projectId) return;
 
     async function loadProjectDetails() {
-      setLoading(true);
       try {
         const { data: projData, error: projError } = await supabase
           .from('gos_progetti')
@@ -200,8 +198,6 @@ export default function ProjectDetailView() {
           stato: 'Attivo',
           codice_progetto: projectId
         });
-      } finally {
-        setLoading(false);
       }
     }
 
@@ -662,7 +658,11 @@ export default function ProjectDetailView() {
 
         {activeTab === 'kronos' && (
           <div className="bg-gray-900 border border-gray-800 p-6 rounded-2xl space-y-6">
-            <KronosGanttView projectId={projectId} />
+            <KronosGanttView
+              projectId={projectId}
+              projectTitle={projectData.titolo}
+              projectCode={projectData.codice_progetto}
+            />
           </div>
         )}
 
