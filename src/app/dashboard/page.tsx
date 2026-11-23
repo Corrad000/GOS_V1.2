@@ -3,6 +3,9 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { UserDashboardView } from '@/app/components/UserDashboardView';
 import { SystemActivityWidget } from '@/app/components/SystemActivityWidget';
+import { CalendarSyncProvider } from '@/app/components/CalendarSyncProvider';
+import GoogleCalendarConnectButton from '@/app/components/GoogleCalendarConnectButton';
+import CalendarLogToolbarButton from '@/app/components/CalendarLogToolbarButton';
 import Footer from '@/app/components/Footer';
 import type { Fase, Voce } from '@/app/utenti/[id]/RiepilogoKanbanDash';
 import type { StatoAzione } from '@/modules/offer-builder/card-trattativa';
@@ -138,22 +141,34 @@ export default async function AdminDashboardPage() {
       : [];
 
   return (
-    <div className="flex min-h-screen w-full flex-col justify-between bg-[#090D16] text-[#E6EAF2]">
-      <main className="w-full space-y-6">
-        <UserDashboardView
-          userId={user.id}
-          userRole={userRole}
-          userName={userName}
-          companies={companiesList}
-          trattative={trattativeList}
-        />
+    <CalendarSyncProvider>
+      <div className="flex min-h-screen w-full flex-col justify-between bg-[#090D16] text-[#E6EAF2]">
+        <main className="w-full space-y-6">
+          <div className="mx-auto flex max-w-[1440px] flex-wrap items-center justify-between gap-3 border-b border-[#1B2540] px-5 pt-4 pb-3 md:px-8">
+            <div className="text-xs font-semibold tracking-wide text-[#8A94A8]">
+              GOOGLE CALENDAR · FOLLOW-UP, TASK &amp; KRONOS
+            </div>
+            <div className="flex flex-wrap items-center gap-2.5">
+              <GoogleCalendarConnectButton />
+              <CalendarLogToolbarButton />
+            </div>
+          </div>
 
-        <div className="mx-auto max-w-[1440px] px-5 pb-4 md:px-8">
-          <SystemActivityWidget />
-        </div>
-      </main>
+          <UserDashboardView
+            userId={user.id}
+            userRole={userRole}
+            userName={userName}
+            companies={companiesList}
+            trattative={trattativeList}
+          />
 
-      <Footer />
-    </div>
+          <div className="mx-auto max-w-[1440px] px-5 pb-4 md:px-8">
+            <SystemActivityWidget />
+          </div>
+        </main>
+
+        <Footer />
+      </div>
+    </CalendarSyncProvider>
   );
 }

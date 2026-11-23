@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useState, useEffect } from 'react';
+import { Suspense, useState, useEffect, useContext, useCallback } from 'react';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import { supabase } from '@/services/supabase/client';
 import AnagraficaForm from '../../components/AnagraficaForm';
@@ -19,6 +19,18 @@ import {
   type ModificaTrattativaPayload,
 } from '@/modules/offer-builder/TrattativaSchedaView';
 import { generateGlobalActivityCode } from '@/utils/codeGenerator';
+import { CalendarSyncProvider, CalendarSyncContext } from '@/app/components/CalendarSyncProvider';
+import GoogleCalendarConnectButton from '@/app/components/GoogleCalendarConnectButton';
+import CalendarLogToolbarButton from '@/app/components/CalendarLogToolbarButton';
+import { ContactsDirectoryView } from '@/modules/contacts/ContactsDirectoryView';
+import { ContactAutocompleteInput } from '@/modules/contacts/ContactAutocompleteInput';
+import {
+  listAllContatti,
+  upsertContatto,
+  splitNomeCognome,
+  type GosContatto,
+} from '@/modules/contacts/contactsService';
+import { KybQuestionnaireView } from '@/modules/kyb/KybQuestionnaireView';
 
 import { DocumentsView } from '@/modules/project-management/DocumentsView';
 
@@ -34,18 +46,40 @@ const PROBABILITA_PER_FASE: Record<FaseTrattativa, number> = {
   chiusura: 1.0,
 };
 
+function formatSupabaseError(err: unknown, fallback: string): string {
+  if (!err) return fallback;
+  if (typeof err === 'string' && err.trim()) return err;
+  if (err instanceof Error && err.message) return err.message;
+  if (typeof err === 'object') {
+    const obj = err as Record<string, unknown>;
+    if (typeof obj.message === 'string' && obj.message.trim()) return obj.message;
+    if (typeof obj.details === 'string' && obj.details.trim()) return obj.details;
+    if (typeof obj.error === 'string' && obj.error.trim()) return obj.error;
+    try {
+      const json = JSON.stringify(err);
+      if (json && json !== '{}') return json;
+    } catch {
+      // ignora errori di serializzazione
+    }
+  }
+  return fallback;
+}
+
 function CompanyPageContent() {
   const router = useRouter();
   const params = useParams();
   const searchParams = useSearchParams();
-  const companyId = params?.id as string;
+  const calendarCtx = useContext(CalendarSyncContext);
+  const companyId = params?.id ? decodeURIComponent(String(params.id)).trim() : '';
   const queryTab = searchParams?.get('tab');
   const queryTrattativaId = searchParams?.get('trattativa');
 
-  const [activeTab, setActiveTab] = useState<'anagrafica' | 'questionari' | 'business' | 'offer-builder' | 'trattative' | 'documenti'>(
+  const [activeTab, setActiveTab] = useState<'anagrafica' | 'contatti' | 'questionari' | 'business' | 'offer-builder' | 'trattative' | 'documenti'>(
     queryTab === 'trattative' ? 'trattative' : 'anagrafica'
   );
+  const [questionariSubTab, setQuestionariSubTab] = useState<'assessment' | 'kyb'>('assessment');
   const [loadingCompany, setLoadingCompany] = useState(true);
+  const [companyError, setCompanyError] = useState<string | null>(null);
 
   const [companyData, setCompanyData] = useState({
     id: '',
@@ -67,6 +101,8 @@ function CompanyPageContent() {
     contratti_attivi: 0,
     stato: 'ATTIVA'
   });
+
+  const [companyContacts, setCompanyContacts] = useState<GosContatto[]>([]);
 
   const [isEditingAnagrafica, setIsEditingAnagrafica] = useState(false);
   const [activeQuestionario, setActiveQuestionario] = useState<any>(null);
@@ -109,6 +145,9 @@ function CompanyPageContent() {
   const [trattativaChiusuraPrevista, setTrattativaChiusuraPrevista] = useState('');
   const [trattativaProssimaAzione, setTrattativaProssimaAzione] = useState('');
   const [trattativaCodiceOfferta, setTrattativaCodiceOfferta] = useState('');
+  const [trattativaReferenteNome, setTrattativaReferenteNome] = useState('');
+  const [trattativaReferenteEmail, setTrattativaReferenteEmail] = useState('');
+  const [trattativaReferenteRuolo, setTrattativaReferenteRuolo] = useState('');
   const [isSubmittingTrattativa, setIsSubmittingTrattativa] = useState(false);
 
   useEffect(() => {
@@ -121,7 +160,7 @@ function CompanyPageContent() {
     setSelectedCompanyModules(prev => prev.filter(m => m.id !== moduleId));
   };
 
-  async function fetchOffersForCompany(targetId: string, targetCode: string) {
+  const fetchOffersForCompany = useCallback(async (targetId: string, targetCode: string) => {
     setLoadingOffers(true);
     try {
       const codeFilter = targetCode || targetId;
@@ -137,33 +176,60 @@ function CompanyPageContent() {
         .order('created_at', { ascending: false });
 
       if (error) {
-        console.error('Errore lettura gos_offerte:', error);
+        console.error('Errore lettura gos_offerte:', formatSupabaseError(error, 'Errore lettura offerte'));
         setOffersList([]);
         return;
       }
 
       setOffersList(data || []);
-    } catch (err) {
-      console.error('Eccezione lettura gos_offerte:', err);
+    } catch (err: unknown) {
+      console.error('Eccezione lettura gos_offerte:', formatSupabaseError(err, 'Errore lettura offerte'));
       setOffersList([]);
     } finally {
       setLoadingOffers(false);
     }
-  }
+  }, []);
 
   useEffect(() => {
-    if (!companyId) return;
+    if (!companyId) {
+      setLoadingCompany(false);
+      return;
+    }
+
+    let cancelled = false;
 
     async function fetchCompanyDetails() {
       setLoadingCompany(true);
+      setCompanyError(null);
       try {
-        const { data, error } = await supabase
+        let data: any = null;
+
+        const byId = await supabase
           .from('gos_aziende')
           .select('*')
           .eq('id', companyId)
-          .single();
+          .maybeSingle();
 
-        if (error) throw error;
+        if (byId.error && byId.error.code !== '22P02') {
+          throw new Error(formatSupabaseError(byId.error, 'Errore lettura azienda da ID'));
+        }
+
+        data = byId.data;
+
+        if (!data) {
+          const byCode = await supabase
+            .from('gos_aziende')
+            .select('*')
+            .eq('codice_azienda', companyId)
+            .maybeSingle();
+
+          if (byCode.error) {
+            throw new Error(formatSupabaseError(byCode.error, 'Errore lettura azienda da codice'));
+          }
+          data = byCode.data;
+        }
+
+        if (cancelled) return;
 
         if (data) {
           setCompanyData({
@@ -186,15 +252,43 @@ function CompanyPageContent() {
             contratti_attivi: Number(data.contratti_attivi || 0),
             stato: data.stato || 'ATTIVA'
           });
+
+          if (data.referente) {
+            const { nome, cognome } = splitNomeCognome(data.referente);
+            void upsertContatto({
+              nome,
+              cognome,
+              email: data.email || null,
+              telefono: data.telefono || null,
+              ruolo: 'Referente Aziendale',
+              aziendaId: data.id,
+              aziendaNome: data.ragione_sociale || null,
+              origine: 'anagrafica',
+            });
+          }
+
+          const loadedContacts = await listAllContatti(data.id);
+          if (!cancelled) setCompanyContacts(loadedContacts);
+        } else {
+          setCompanyError('Azienda non trovata su Supabase.');
         }
-      } catch (err: any) {
-        console.error('Errore nel caricamento dell\'azienda:', err?.message || err);
+      } catch (err: unknown) {
+        if (!cancelled) {
+          const msg = formatSupabaseError(err, 'Errore nel caricamento dell\'azienda');
+          console.error('Errore nel caricamento dell\'azienda:', msg);
+          setCompanyError(msg);
+        }
       } finally {
-        setLoadingCompany(false);
+        if (!cancelled) {
+          setLoadingCompany(false);
+        }
       }
     }
 
     fetchCompanyDetails();
+    return () => {
+      cancelled = true;
+    };
   }, [companyId]);
 
   const companyCode = companyData.codice_azienda;
@@ -202,6 +296,8 @@ function CompanyPageContent() {
 
   useEffect(() => {
     if (activeTab !== 'business' || !companyCode) return;
+
+    let cancelled = false;
 
     async function loadProgetti() {
       setLoadingBp(true);
@@ -211,16 +307,19 @@ function CompanyPageContent() {
           .select('*')
           .eq('company_code', companyCode);
 
-        if (error) throw error;
-        setBusinessPlans(data || []);
-      } catch (err) {
-        setBusinessPlans([]);
+        if (error) throw new Error(formatSupabaseError(error, 'Errore caricamento progetti'));
+        if (!cancelled) setBusinessPlans(data || []);
+      } catch {
+        if (!cancelled) setBusinessPlans([]);
       } finally {
-        setLoadingBp(false);
+        if (!cancelled) setLoadingBp(false);
       }
     }
 
     loadProgetti();
+    return () => {
+      cancelled = true;
+    };
   }, [activeTab, companyCode]);
 
   useEffect(() => {
@@ -234,10 +333,12 @@ function CompanyPageContent() {
     if (!resolvedCompanyId && !companyCode) return;
 
     void fetchOffersForCompany(resolvedCompanyId, companyCode);
-  }, [activeTab, resolvedCompanyId, companyCode, showCreateTrattativaModal]);
+  }, [activeTab, resolvedCompanyId, companyCode, showCreateTrattativaModal, fetchOffersForCompany]);
 
   useEffect(() => {
     if (activeTab !== 'trattative' || !resolvedCompanyId) return;
+
+    let cancelled = false;
 
     async function loadTrattative() {
       setLoadingTrattative(true);
@@ -248,7 +349,9 @@ function CompanyPageContent() {
           .eq('azienda_id', resolvedCompanyId)
           .order('created_at', { ascending: false });
 
-        if (error) throw error;
+        if (error) throw new Error(formatSupabaseError(error, 'Errore caricamento trattative'));
+        if (cancelled) return;
+
         const rows = data || [];
         setTrattativeList(rows);
 
@@ -258,14 +361,17 @@ function CompanyPageContent() {
             setActiveTrattativa(found);
           }
         }
-      } catch (err) {
-        setTrattativeList([]);
+      } catch {
+        if (!cancelled) setTrattativeList([]);
       } finally {
-        setLoadingTrattative(false);
+        if (!cancelled) setLoadingTrattative(false);
       }
     }
 
     loadTrattative();
+    return () => {
+      cancelled = true;
+    };
   }, [activeTab, resolvedCompanyId, queryTrattativaId]);
 
   const appendRegistro = (trattativaId: string, voce: VoceRegistro) => {
@@ -315,8 +421,9 @@ function CompanyPageContent() {
       .eq('id', trattativaId);
 
     if (error) {
-      alert('Errore salvataggio trattativa su Supabase: ' + error.message);
-      throw new Error(error.message);
+      const msg = formatSupabaseError(error, 'Errore salvataggio trattativa su Supabase');
+      alert('Errore salvataggio trattativa su Supabase: ' + msg);
+      throw new Error(msg);
     }
 
     syncTrattativaLocal(trattativaId, updateDbPayload);
@@ -354,7 +461,7 @@ function CompanyPageContent() {
         .select()
         .single();
 
-      if (error) throw error;
+      if (error) throw new Error(formatSupabaseError(error, 'Impossibile registrare il progetto.'));
 
       const created = data || { id: Date.now().toString(), ...newProgettoPayload };
       setBusinessPlans(prev => [...prev, created]);
@@ -365,8 +472,8 @@ function CompanyPageContent() {
       setShowCreateBpModal(false);
 
       router.push(`/progetti/${created.id}`);
-    } catch (err: any) {
-      alert('Errore Supabase: ' + (err.message || 'Impossibile registrare il progetto.'));
+    } catch (err: unknown) {
+      alert('Errore Supabase: ' + formatSupabaseError(err, 'Impossibile registrare il progetto.'));
     } finally {
       setIsSubmittingBp(false);
     }
@@ -397,8 +504,9 @@ function CompanyPageContent() {
         .single();
 
       if (error) {
-        console.error('Errore INSERT gos_offerte:', error);
-        throw new Error(error.message);
+        const msg = formatSupabaseError(error, 'Errore creazione offerta');
+        console.error('Errore INSERT gos_offerte:', msg);
+        throw new Error(msg);
       }
 
       const created = data;
@@ -410,8 +518,8 @@ function CompanyPageContent() {
 
       setActiveOffer(created);
       setSelectedCompanyModules(Array.isArray(created.moduli) ? created.moduli : []);
-    } catch (err: any) {
-      alert('Errore nella creazione dell\'offerta: ' + (err?.message || err));
+    } catch (err: unknown) {
+      alert('Errore nella creazione dell\'offerta: ' + formatSupabaseError(err, 'Errore sconosciuto'));
     } finally {
       setIsSubmittingOffer(false);
     }
@@ -427,7 +535,7 @@ function CompanyPageContent() {
         .select()
         .single();
 
-      if (error) throw error;
+      if (error) throw new Error(formatSupabaseError(error, 'Errore salvataggio moduli offerta'));
 
       if (data) {
         setActiveOffer(data);
@@ -435,8 +543,8 @@ function CompanyPageContent() {
         setOffersList(prev => prev.map(o => (o.id === data.id ? data : o)));
         alert('Moduli salvati su Supabase!');
       }
-    } catch (err: any) {
-      alert('Errore salvataggio moduli offerta: ' + (err.message || err));
+    } catch (err: unknown) {
+      alert('Errore salvataggio moduli offerta: ' + formatSupabaseError(err, 'Errore sconosciuto'));
     }
   };
 
@@ -448,6 +556,26 @@ function CompanyPageContent() {
     try {
       const codiceTrattativa = await generateGlobalActivityCode(companyCode || resolvedCompanyId, 'TRT');
       const probDecimal = Math.min(1, Math.max(0, (Number(trattativaProbabilita) || 0) / 100));
+      const chiusuraIso = trattativaChiusuraPrevista
+        ? new Date(trattativaChiusuraPrevista).toISOString()
+        : null;
+      const nextActionText = trattativaProssimaAzione.trim() || 'Definire primo contatto o follow-up';
+      const chosenReferente = trattativaReferenteNome.trim() || companyData.referente || null;
+
+      if (chosenReferente) {
+        const { nome, cognome } = splitNomeCognome(chosenReferente);
+        await upsertContatto({
+          nome,
+          cognome,
+          email: trattativaReferenteEmail.trim() || null,
+          ruolo: trattativaReferenteRuolo.trim() || 'Referente Trattativa',
+          aziendaId: resolvedCompanyId,
+          aziendaNome: companyData.ragione_sociale,
+          origine: 'trattativa',
+        });
+        const refreshed = await listAllContatti(resolvedCompanyId);
+        setCompanyContacts(refreshed);
+      }
 
       const newTrattativaPayload = {
         azienda_id: resolvedCompanyId,
@@ -458,9 +586,9 @@ function CompanyPageContent() {
         probabilita: probDecimal,
         valore: Number(trattativaValore) || 0,
         codice_offerta: trattativaCodiceOfferta.trim() || null,
-        chiusura_prevista: trattativaChiusuraPrevista ? new Date(trattativaChiusuraPrevista).toISOString() : null,
-        azione_necessaria: trattativaProssimaAzione.trim() || 'Definire primo contatto o follow-up',
-        referente_nome: companyData.referente || null,
+        chiusura_prevista: chiusuraIso,
+        azione_necessaria: nextActionText,
+        referente_nome: chosenReferente,
         advisor_nome: companyData.advisor_nome || 'Corrado Pinna',
         note: trattativaDescrizione.trim() || null,
         created_at: new Date().toISOString(),
@@ -472,7 +600,7 @@ function CompanyPageContent() {
         .select()
         .single();
 
-      if (error) throw error;
+      if (error) throw new Error(formatSupabaseError(error, 'Errore nella creazione della trattativa'));
 
       const created = data || { id: Date.now().toString(), ...newTrattativaPayload };
       setTrattativeList(prev => [created, ...prev]);
@@ -485,10 +613,24 @@ function CompanyPageContent() {
       setTrattativaChiusuraPrevista('');
       setTrattativaProssimaAzione('');
       setTrattativaCodiceOfferta('');
+      setTrattativaReferenteNome('');
+      setTrattativaReferenteEmail('');
+      setTrattativaReferenteRuolo('');
       setShowCreateTrattativaModal(false);
       setActiveTrattativa(created);
-    } catch (err: any) {
-      alert('Errore nella creazione della trattativa: ' + (err.message || err));
+
+      if (calendarCtx && chiusuraIso) {
+        await calendarCtx.promptDateSync({
+          type: 'FOLLOW_UP',
+          title: `${companyData.ragione_sociale} — ${created.titolo}`,
+          description: nextActionText,
+          startIso: chiusuraIso,
+          table: 'gos_trattative',
+          recordId: String(created.id),
+        });
+      }
+    } catch (err: unknown) {
+      alert('Errore nella creazione della trattativa: ' + formatSupabaseError(err, 'Errore sconosciuto'));
     } finally {
       setIsSubmittingTrattativa(false);
     }
@@ -539,6 +681,20 @@ function CompanyPageContent() {
       },
     ];
 
+    const contattiScheda =
+      companyContacts.length > 0
+        ? companyContacts.map((c) => ({
+            nome: c.nome_completo,
+            ruolo: c.ruolo || 'Referente',
+            email: c.email || undefined,
+            telefono: c.telefono || undefined,
+          }))
+        : t.referente_nome
+          ? [{ nome: t.referente_nome, ruolo: 'Referente' }]
+          : companyData.referente
+            ? [{ nome: companyData.referente, ruolo: 'Referente' }]
+            : [];
+
     return {
       trattativa: {
         id: t.id,
@@ -568,11 +724,7 @@ function CompanyPageContent() {
       timeline: trattativaTimelineMap[t.id] || [],
       registro: registroIniziale,
       offerte: offerteCollegateScheda,
-      contatti: t.referente_nome
-        ? [{ nome: t.referente_nome, ruolo: 'Referente' }]
-        : companyData.referente
-          ? [{ nome: companyData.referente, ruolo: 'Referente' }]
-          : [],
+      contatti: contattiScheda,
     };
   };
 
@@ -670,9 +822,12 @@ function CompanyPageContent() {
     payload: { titolo: string; data: string }
   ) => {
     const nowIso = new Date().toISOString();
+    const parsedDate = new Date(payload.data);
+    const isoTarget = Number.isNaN(parsedDate.getTime()) ? nowIso : parsedDate.toISOString();
+
     const patch = {
       azione_programmata_titolo: payload.titolo,
-      azione_programmata_data: payload.data,
+      azione_programmata_data: isoTarget,
       azione_necessaria: payload.titolo,
       ultima_modifica: nowIso,
     };
@@ -684,13 +839,18 @@ function CompanyPageContent() {
       quando: nowIso,
       tipo: 'followup',
       titolo: `Follow-up programmato: ${payload.titolo}`,
-      dettaglio: `Scadenza: ${new Date(payload.data).toLocaleString('it-IT')}`,
+      dettaglio: `Scadenza: ${new Date(isoTarget).toLocaleString('it-IT')}`,
       autore: companyData.advisor_nome || 'Advisor',
     });
 
     await supabase
       .from('gos_trattative')
-      .update({ azione_necessaria: payload.titolo, ultima_modifica: nowIso })
+      .update({
+        azione_necessaria: payload.titolo,
+        azione_programmata_titolo: payload.titolo,
+        azione_programmata_data: isoTarget,
+        ultima_modifica: nowIso,
+      })
       .eq('id', trattativaId);
   };
 
@@ -721,7 +881,12 @@ function CompanyPageContent() {
 
     await supabase
       .from('gos_trattative')
-      .update({ azione_necessaria: 'Nessuna azione da fare', ultima_modifica: nowIso })
+      .update({
+        azione_necessaria: 'Nessuna azione da fare',
+        azione_programmata_titolo: null,
+        azione_programmata_data: null,
+        ultima_modifica: nowIso,
+      })
       .eq('id', trattativaId);
   };
 
@@ -729,7 +894,7 @@ function CompanyPageContent() {
     <main className="min-h-screen bg-gray-950 text-gray-100 font-sans p-6 md:p-10 space-y-8">
       <div className="max-w-7xl mx-auto space-y-8">
 
-        <div className="flex justify-between items-center border-b border-gray-800 pb-6">
+        <div className="flex flex-wrap justify-between items-center gap-4 border-b border-gray-800 pb-6">
           <div className="space-y-2">
             <div className="flex items-center gap-3">
               <span className="px-3 py-1 bg-gray-900 border border-gray-800 text-[#FF5500] font-mono text-xs font-bold rounded-lg uppercase">
@@ -745,13 +910,23 @@ function CompanyPageContent() {
             <p className="text-xs text-gray-400">Panoramica strategica e configurazione commerciale</p>
           </div>
 
-          <button
-            onClick={() => router.push('/dashboard')}
-            className="px-4 py-2 bg-gray-900 hover:bg-gray-800 border border-gray-800 text-xs font-semibold rounded-xl text-gray-300 transition-all cursor-pointer"
-          >
-            Torna alla Dashboard
-          </button>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <GoogleCalendarConnectButton />
+            <CalendarLogToolbarButton />
+            <button
+              onClick={() => router.push('/dashboard')}
+              className="px-4 py-2 bg-gray-900 hover:bg-gray-800 border border-gray-800 text-xs font-semibold rounded-xl text-gray-300 transition-all cursor-pointer"
+            >
+              Torna alla Dashboard
+            </button>
+          </div>
         </div>
+
+        {!loadingCompany && companyError && (
+          <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-xs text-amber-200">
+            {companyError}
+          </div>
+        )}
 
         <div className="flex flex-wrap gap-6 border-b border-gray-800 pb-4 text-sm font-semibold">
           <button
@@ -761,16 +936,22 @@ function CompanyPageContent() {
             Anagrafica
           </button>
           <button
+            onClick={() => setActiveTab('contatti')}
+            className={`pb-2 transition-all cursor-pointer ${activeTab === 'contatti' ? 'text-white border-b-2 border-[#FF5500]' : 'text-gray-400 hover:text-gray-200'}`}
+          >
+            Contatti &amp; Referenti
+          </button>
+          <button
             onClick={() => { setActiveTab('questionari'); setActiveQuestionario(null); setShowQuestPreview(false); }}
             className={`pb-2 transition-all cursor-pointer ${activeTab === 'questionari' ? 'text-white border-b-2 border-[#FF5500]' : 'text-gray-400 hover:text-gray-200'}`}
           >
-            Questionari & Assessment
+            Questionari &amp; Assessment
           </button>
           <button
             onClick={() => setActiveTab('business')}
             className={`pb-2 transition-all cursor-pointer ${activeTab === 'business' ? 'text-white border-b-2 border-[#FF5500]' : 'text-gray-400 hover:text-gray-200'}`}
           >
-            Business Plan & Finanziario
+            Business Plan &amp; Finanziario
           </button>
           <button
             onClick={() => { setActiveTab('offer-builder'); setActiveOffer(null); setShowOfferPreview(false); }}
@@ -788,7 +969,7 @@ function CompanyPageContent() {
             onClick={() => setActiveTab('documenti')}
             className={`pb-2 transition-all cursor-pointer ${activeTab === 'documenti' ? 'text-white border-b-2 border-[#FF5500]' : 'text-gray-400 hover:text-gray-200'}`}
           >
-            Documenti & File
+            Documenti &amp; File
           </button>
         </div>
 
@@ -823,15 +1004,31 @@ function CompanyPageContent() {
                         note: updatedData.note,
                         stato: updatedData.stato
                       })
-                      .eq('id', companyId);
+                      .eq('id', resolvedCompanyId);
 
-                    if (error) throw error;
+                    if (error) throw new Error(formatSupabaseError(error, 'Errore salvataggio anagrafica'));
+
+                    if (updatedData.referente) {
+                      const { nome, cognome } = splitNomeCognome(updatedData.referente);
+                      await upsertContatto({
+                        nome,
+                        cognome,
+                        email: updatedData.email || null,
+                        telefono: updatedData.telefono || null,
+                        ruolo: 'Referente Aziendale',
+                        aziendaId: resolvedCompanyId,
+                        aziendaNome: updatedData.ragione_sociale,
+                        origine: 'anagrafica',
+                      });
+                      const refreshed = await listAllContatti(resolvedCompanyId);
+                      setCompanyContacts(refreshed);
+                    }
 
                     setCompanyData(prev => ({ ...prev, ...updatedData }));
                     setIsEditingAnagrafica(false);
                     alert('Dati aziendali aggiornati con successo!');
-                  } catch (err: any) {
-                    alert('Errore durante il salvataggio: ' + (err.message || err));
+                  } catch (err: unknown) {
+                    alert('Errore durante il salvataggio: ' + formatSupabaseError(err, 'Errore sconosciuto'));
                   }
                 }}
                 onCancel={() => setIsEditingAnagrafica(false)}
@@ -840,9 +1037,59 @@ function CompanyPageContent() {
           </div>
         )}
 
+        {activeTab === 'contatti' && (
+          <ContactsDirectoryView
+            aziendaId={resolvedCompanyId}
+            aziendaNome={companyData.ragione_sociale}
+          />
+        )}
+
         {activeTab === 'questionari' && (
           <div className="space-y-6">
-            {!activeQuestionario ? (
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setQuestionariSubTab('assessment')}
+                className={`cursor-pointer rounded-xl px-4 py-2 text-xs font-bold uppercase tracking-wider transition ${
+                  questionariSubTab === 'assessment'
+                    ? 'bg-[#FF5500] text-white shadow'
+                    : 'bg-gray-900 text-gray-400 border border-gray-800 hover:text-white'
+                }`}
+              >
+                Questionari &amp; Assessment
+              </button>
+              <button
+                type="button"
+                onClick={() => setQuestionariSubTab('kyb')}
+                className={`cursor-pointer rounded-xl px-4 py-2 text-xs font-bold uppercase tracking-wider transition ${
+                  questionariSubTab === 'kyb'
+                    ? 'bg-[#FF5500] text-white shadow'
+                    : 'bg-gray-900 text-gray-400 border border-gray-800 hover:text-white'
+                }`}
+              >
+                Pacchetto KYB (Societario &amp; UBO)
+              </button>
+            </div>
+
+            {questionariSubTab === 'kyb' ? (
+              <KybQuestionnaireView
+                companyCode={companyCode || resolvedCompanyId}
+                aziendaId={resolvedCompanyId}
+                companySeed={{
+                  ragione_sociale: companyData.ragione_sociale,
+                  partita_iva: companyData.partita_iva,
+                  codice_fiscale: companyData.codice_fiscale,
+                  indirizzo: companyData.indirizzo,
+                  citta: companyData.citta,
+                  nazione: companyData.nazione,
+                  sito_web: companyData.sito_web,
+                  referente: companyData.referente,
+                  email: companyData.email,
+                  telefono: companyData.telefono,
+                  advisor_nome: companyData.advisor_nome,
+                }}
+              />
+            ) : !activeQuestionario ? (
               <QuestionnaireBuilderView
                 companyCode={companyCode}
                 companyName={companyData.ragione_sociale}
@@ -883,7 +1130,7 @@ function CompanyPageContent() {
           <div className="bg-gray-900 border border-gray-800 p-6 rounded-2xl space-y-6">
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-gray-800 pb-4">
               <div>
-                <h3 className="text-base font-bold text-white uppercase">Progetti & Business Plan</h3>
+                <h3 className="text-base font-bold text-white uppercase">Progetti &amp; Business Plan</h3>
                 <p className="text-xs text-gray-400 mt-0.5">Elenco dei piani e progetti strategici sviluppati per {companyData.ragione_sociale}.</p>
               </div>
               <button
@@ -1041,7 +1288,7 @@ function CompanyPageContent() {
                     )}
 
                     <OfferBuilderView
-                      companyId={companyId}
+                      companyId={resolvedCompanyId}
                       companyCode={companyCode}
                       offerId={activeOffer.id}
                       selectedCompanyModules={selectedCompanyModules}
@@ -1223,7 +1470,7 @@ function CompanyPageContent() {
         )}
 
         {activeTab === 'documenti' && (
-          <DocumentsView projectId={companyData.id || companyId} />
+          <DocumentsView projectId={resolvedCompanyId} />
         )}
 
       </div>
@@ -1322,7 +1569,7 @@ function CompanyPageContent() {
 
       {showCreateTrattativaModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-gray-900 border border-gray-800 rounded-2xl max-w-lg w-full p-6 space-y-5 shadow-2xl">
+          <div className="bg-gray-900 border border-gray-800 rounded-2xl max-w-lg w-full p-6 space-y-5 shadow-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center border-b border-gray-800 pb-4">
               <div>
                 <h3 className="text-sm font-extrabold text-white uppercase tracking-wider">Crea Nuova Trattativa</h3>
@@ -1342,6 +1589,40 @@ function CompanyPageContent() {
                   className="w-full bg-gray-950 border border-gray-700 px-3.5 py-2.5 rounded-xl text-white text-xs focus:outline-none focus:border-[#FF5500]"
                   required
                 />
+              </div>
+
+              <div className="space-y-3 rounded-xl border border-gray-800 bg-gray-950/60 p-3">
+                <ContactAutocompleteInput
+                  label="Referente / Interlocutore (con richiamo in rubrica)"
+                  value={trattativaReferenteNome}
+                  onChange={setTrattativaReferenteNome}
+                  aziendaId={resolvedCompanyId}
+                  aziendaNome={companyData.ragione_sociale}
+                  origine="trattativa"
+                  defaultRuolo={trattativaReferenteRuolo || 'Referente Trattativa'}
+                  placeholder={companyData.referente ? `Default: ${companyData.referente}` : 'Digita nome o cerca in rubrica...'}
+                  onSelectContact={(c) => {
+                    setTrattativaReferenteNome(c.nome_completo);
+                    if (c.email) setTrattativaReferenteEmail(c.email);
+                    if (c.ruolo) setTrattativaReferenteRuolo(c.ruolo);
+                  }}
+                />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <input
+                    type="email"
+                    placeholder="Email referente (opzionale)"
+                    value={trattativaReferenteEmail}
+                    onChange={(e) => setTrattativaReferenteEmail(e.target.value)}
+                    className="w-full bg-gray-950 border border-gray-700 px-3 py-2 rounded-xl text-white text-xs focus:outline-none focus:border-[#FF5500]"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Ruolo (es. CEO, Buyer)"
+                    value={trattativaReferenteRuolo}
+                    onChange={(e) => setTrattativaReferenteRuolo(e.target.value)}
+                    className="w-full bg-gray-950 border border-gray-700 px-3 py-2 rounded-xl text-white text-xs focus:outline-none focus:border-[#FF5500]"
+                  />
+                </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -1459,14 +1740,16 @@ function CompanyPageContent() {
 
 export default function CompanyPage() {
   return (
-    <Suspense
-      fallback={
-        <main className="min-h-screen bg-gray-950 text-gray-400 p-10 text-xs font-mono">
-          Caricamento scheda azienda...
-        </main>
-      }
-    >
-      <CompanyPageContent />
-    </Suspense>
+    <CalendarSyncProvider>
+      <Suspense
+        fallback={
+          <main className="min-h-screen bg-gray-950 text-gray-400 p-10 text-xs font-mono">
+            Caricamento scheda azienda...
+          </main>
+        }
+      >
+        <CompanyPageContent />
+      </Suspense>
+    </CalendarSyncProvider>
   );
 }

@@ -6,10 +6,12 @@ import { createBrowserClient } from '@supabase/ssr';
 import { CompanyItem, CompanyTable } from './CompanyTable';
 import { UsersTable } from './UsersTable';
 import { CatalogDashboardView } from '@/modules/offer-builder/CatalogDashboardView';
+import { ContactsDirectoryView } from '@/modules/contacts/ContactsDirectoryView';
 import {
   RiepilogoKanbanDash,
   type Voce,
 } from '@/app/utenti/[id]/RiepilogoKanbanDash';
+import { useCalendarSync } from './CalendarSyncProvider';
 
 interface UserDashboardViewProps {
   userId?: string;
@@ -23,6 +25,7 @@ type MainTab =
   | 'cruscotto'
   | 'trattative'
   | 'aziende'
+  | 'contatti'
   | 'offerte'
   | 'questionari'
   | 'utenti';
@@ -94,6 +97,7 @@ export function UserDashboardView({
   trattative = [],
 }: UserDashboardViewProps) {
   const router = useRouter();
+  const { promptDateSync, deleteCalendarEvent } = useCalendarSync();
   const [activeTab, setActiveTab] = useState<MainTab>('cruscotto');
   const [localCompanies, setLocalCompanies] = useState<CompanyItem[]>(companies);
   const [localDeals, setLocalDeals] = useState<Voce[]>(trattative);
@@ -364,6 +368,14 @@ export function UserDashboardView({
             : item
         )
       );
+
+      await deleteCalendarEvent({
+        type: 'FOLLOW_UP',
+        title: `${deal.azienda.nome} — ${deal.nome}`,
+        startIso: deal.azioneProgrammata?.data || deal.scadenzaOriginale,
+        table: 'gos_trattative',
+        recordId: deal.id,
+      });
     } catch (err: any) {
       setFeedbackMsg(err?.message || 'Errore aggiornamento azione su Supabase');
     } finally {
@@ -379,13 +391,14 @@ export function UserDashboardView({
     safeBase.setDate(safeBase.getDate() + 3);
     const nextIso = safeBase.toISOString();
     const nowIso = new Date().toISOString();
+    const actionTitle = deal.azioneProgrammata?.titolo || deal.azioneNecessaria;
 
     try {
       const { error } = await supabase
         .from('gos_trattative')
         .update({
           stato_azione: 'programmata',
-          azione_programmata_titolo: deal.azioneProgrammata?.titolo || deal.azioneNecessaria,
+          azione_programmata_titolo: actionTitle,
           azione_programmata_data: nextIso,
           ultima_modifica: nowIso,
         })
@@ -400,7 +413,7 @@ export function UserDashboardView({
                 ...item,
                 statoAzione: 'programmata',
                 azioneProgrammata: {
-                  titolo: deal.azioneProgrammata?.titolo || deal.azioneNecessaria,
+                  titolo: actionTitle,
                   data: nextIso,
                 },
                 ultimaModifica: nowIso,
@@ -408,6 +421,15 @@ export function UserDashboardView({
             : item
         )
       );
+
+      await promptDateSync({
+        type: 'FOLLOW_UP',
+        title: `${deal.azienda.nome} — ${deal.nome}`,
+        description: actionTitle,
+        startIso: nextIso,
+        table: 'gos_trattative',
+        recordId: deal.id,
+      });
     } catch (err: any) {
       setFeedbackMsg(err?.message || 'Errore rinvio azione su Supabase');
     } finally {
@@ -446,6 +468,7 @@ export function UserDashboardView({
     { key: 'cruscotto', label: 'Cruscotto Operativo' },
     { key: 'trattative', label: 'Trattative' },
     { key: 'aziende', label: 'Database Aziende' },
+    { key: 'contatti', label: 'Rubrica Contatti' },
     { key: 'offerte', label: 'Offer Builder' },
     { key: 'questionari', label: 'Questionari' },
     { key: 'utenti', label: 'Utenti & Permessi' },
@@ -795,6 +818,8 @@ export function UserDashboardView({
           }}
         />
       )}
+
+      {activeTab === 'contatti' && <ContactsDirectoryView />}
 
       {activeTab === 'offerte' && <CatalogDashboardView />}
 

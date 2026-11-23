@@ -20,7 +20,8 @@ function NavigationHeader() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
 
-  const isShareRoute = pathname?.startsWith('/share');
+  const isPublicClientRoute =
+    pathname?.startsWith('/share') || pathname?.startsWith('/kyb');
 
   useEffect(() => {
     setMounted(true);
@@ -33,7 +34,7 @@ function NavigationHeader() {
       })
     );
 
-    if (isShareRoute) return;
+    if (isPublicClientRoute) return;
 
     async function getSessionUser() {
       const {
@@ -68,7 +69,7 @@ function NavigationHeader() {
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [supabase, isShareRoute]);
+  }, [supabase, isPublicClientRoute]);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -76,7 +77,7 @@ function NavigationHeader() {
     router.refresh();
   };
 
-  if (pathname === '/' || isShareRoute) return null;
+  if (pathname === '/' || isPublicClientRoute) return null;
 
   return (
     <header className="bg-[#050B14] border-b border-[#1E293B] w-full max-w-none shrink-0 p-[10px]">
@@ -134,9 +135,10 @@ function NavigationHeader() {
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const isShareRoute = pathname?.startsWith('/share');
+  const isPublicClientRoute =
+    pathname?.startsWith('/share') || pathname?.startsWith('/kyb');
 
-  if (isShareRoute) {
+  if (isPublicClientRoute) {
     return <>{children}</>;
   }
 

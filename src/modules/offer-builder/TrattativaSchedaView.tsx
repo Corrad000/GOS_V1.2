@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useContext } from 'react';
+import { CalendarSyncContext } from '@/app/components/CalendarSyncProvider';
 
 export type StatoAzione = 'scaduta' | 'oggi' | 'programmata' | 'senza_azione';
 export type FaseTrattativa = 'lead' | 'qualifica' | 'proposta' | 'negoziazione' | 'chiusura';
@@ -183,6 +184,7 @@ export const SchedaTrattativa: React.FC<SchedaTrattativaProps> = ({
   onApriOfferta,
   onModificaTrattativa,
 }) => {
+  const calendarCtx = useContext(CalendarSyncContext);
   const { timeline, registro, offerte, contatti } = dati;
   const [trattativaLocale, setTrattativaLocale] = useState<TrattativaDettaglio>(dati.trattativa);
 
@@ -310,15 +312,44 @@ export const SchedaTrattativa: React.FC<SchedaTrattativaProps> = ({
     e.preventDefault();
     if (!followupTitolo.trim() || !followupData || savingFollowup) return;
     setSavingFollowup(true);
+    const cleanTitle = followupTitolo.trim();
+    const parsedDate = new Date(followupData);
+    const startIso = Number.isNaN(parsedDate.getTime())
+      ? new Date().toISOString()
+      : parsedDate.toISOString();
+
     try {
       await onProgrammaFollowUp({
-        titolo: followupTitolo.trim(),
+        titolo: cleanTitle,
         data: followupData,
       });
+
+      setTrattativaLocale((prev) => ({
+        ...prev,
+        azioneNecessaria: cleanTitle,
+        azioneProgrammata: {
+          titolo: cleanTitle,
+          data: startIso,
+        },
+        statoAzione: 'programmata',
+        ultimaModifica: new Date().toISOString(),
+      }));
+
       setFollowupTitolo('');
       setFollowupData('');
       setModalTipo(null);
       setTabAttivo('timeline');
+
+      if (calendarCtx) {
+        await calendarCtx.promptDateSync({
+          type: 'FOLLOW_UP',
+          title: `${trattativaLocale.azienda.nome} — ${trattativaLocale.nome}`,
+          description: cleanTitle,
+          startIso,
+          table: 'gos_trattative',
+          recordId: trattativaLocale.id,
+        });
+      }
     } finally {
       setSavingFollowup(false);
     }
@@ -329,6 +360,16 @@ export const SchedaTrattativa: React.FC<SchedaTrattativaProps> = ({
     setCompletingAction(true);
     try {
       await onConfermaAzioneFatta();
+      if (calendarCtx) {
+        await calendarCtx.deleteCalendarEvent({
+          type: 'FOLLOW_UP',
+          title: `${trattativaLocale.azienda.nome} — ${trattativaLocale.nome}`,
+          startIso:
+            trattativaLocale.azioneProgrammata?.data || trattativaLocale.chiusuraPrevista,
+          table: 'gos_trattative',
+          recordId: trattativaLocale.id,
+        });
+      }
     } finally {
       setCompletingAction(false);
     }
