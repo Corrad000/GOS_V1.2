@@ -7,6 +7,7 @@ import { CompanyItem, CompanyTable } from './CompanyTable';
 import { UsersTable } from './UsersTable';
 import { CatalogDashboardView } from '@/modules/offer-builder/CatalogDashboardView';
 import { ContactsDirectoryView } from '@/modules/contacts/ContactsDirectoryView';
+import { InvoiceGeneratorView } from '@/modules/invoices/InvoiceGeneratorView';
 import {
   RiepilogoKanbanDash,
   type Voce,
@@ -27,6 +28,7 @@ type MainTab =
   | 'aziende'
   | 'contatti'
   | 'offerte'
+  | 'fatture'
   | 'questionari'
   | 'utenti';
 
@@ -102,20 +104,17 @@ export function UserDashboardView({
   const [localCompanies, setLocalCompanies] = useState<CompanyItem[]>(companies);
   const [localDeals, setLocalDeals] = useState<Voce[]>(trattative);
 
-  // Filtri Cruscotto Operativo
   const [radarFilter, setRadarFilter] = useState<RadarFilter>('tutte');
   const [companyScope, setCompanyScope] = useState<'mie' | 'tutte'>('mie');
   const [companySearch, setCompanySearch] = useState('');
   const [busyDealId, setBusyDealId] = useState<string | null>(null);
   const [feedbackMsg, setFeedbackMsg] = useState<string | null>(null);
 
-  // Gallery Questionari Master
   const [categories, setCategories] = useState<any[]>([]);
   const [filterCategoryId, setFilterCategoryId] = useState<string>('all');
   const [masterQuestionnaires, setMasterQuestionnaires] = useState<any[]>([]);
   const [loadingQuestionnaires, setLoadingQuestionnaires] = useState(false);
 
-  // Metriche di sistema
   const [stats, setStats] = useState({
     totalModules: 0,
     totalCategories: 0,
@@ -470,6 +469,7 @@ export function UserDashboardView({
     { key: 'aziende', label: 'Database Aziende' },
     { key: 'contatti', label: 'Rubrica Contatti' },
     { key: 'offerte', label: 'Offer Builder' },
+    { key: 'fatture', label: 'Invoice Generator' },
     { key: 'questionari', label: 'Questionari' },
     { key: 'utenti', label: 'Utenti & Permessi' },
   ];
@@ -532,7 +532,6 @@ export function UserDashboardView({
 
       {activeTab === 'cruscotto' && (
         <div className="space-y-5">
-          {/* 3 KPI CARDS IN ALTO */}
           <section className="grid grid-cols-1 gap-3.5 md:grid-cols-3">
             <div className="rounded-xl border border-[#1B2540] bg-[#0B132B] px-5 py-4">
               <div className="text-[11px] font-semibold uppercase tracking-widest text-[#8A94A8]">
@@ -579,9 +578,7 @@ export function UserDashboardView({
             </div>
           </section>
 
-          {/* CORPO CENTRALE A 2 COLONNE (5 + 7) */}
           <section className="grid grid-cols-12 items-start gap-5">
-            {/* COLONNA SINISTRA: RADAR AZIONI & TRATTATIVE PRIORITARIE */}
             <div className="col-span-12 rounded-2xl border border-[#1B2540] bg-[#0B132B] p-5 lg:col-span-5">
               <div className="mb-3.5 flex items-center justify-between">
                 <h2 className="text-[15px] font-bold tracking-wide text-white">
@@ -685,7 +682,6 @@ export function UserDashboardView({
               </div>
             </div>
 
-            {/* COLONNA DESTRA: AZIENDE IN LAVORAZIONE & FOLLOW-UP */}
             <div className="col-span-12 rounded-2xl border border-[#1B2540] bg-[#0B132B] p-5 lg:col-span-7">
               <div className="mb-3.5 flex flex-wrap items-center justify-between gap-3">
                 <h2 className="text-[15px] font-bold tracking-wide text-white">
@@ -822,6 +818,10 @@ export function UserDashboardView({
       {activeTab === 'contatti' && <ContactsDirectoryView />}
 
       {activeTab === 'offerte' && <CatalogDashboardView />}
+
+      {activeTab === 'fatture' && (
+        <InvoiceGeneratorView initialCompanies={localCompanies} />
+      )}
 
       {activeTab === 'questionari' && (
         <div className="space-y-6 rounded-2xl border border-[#1B2540] bg-[#0B132B] p-6 shadow-xl">

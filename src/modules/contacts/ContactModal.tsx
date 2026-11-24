@@ -33,6 +33,12 @@ const COUNTRY_OPTIONS = [
   { name: 'Altro', dial: '', iso: 'INTL' },
 ];
 
+const DIAL_OPTIONS = Array.from(
+  new Map(
+    COUNTRY_OPTIONS.filter((c) => c.dial).map((c) => [c.dial, `${c.dial} (${c.iso})`])
+  ).entries()
+).map(([dial, label]) => ({ dial, label }));
+
 function parseDialAndLocal(fullPhone?: string | null): { dial: string; local: string } {
   const raw = String(fullPhone || '').trim();
   if (!raw) return { dial: '+39', local: '' };
@@ -66,13 +72,12 @@ export function ContactModal({
   defaultAziendaId = null,
   defaultAziendaNome = null,
 }: ContactModalProps) {
-  const parsedPhone = parseDialAndLocal(initialContact?.telefono);
-
   const [fullName, setFullName] = useState('');
   const [ruolo, setRuolo] = useState('');
   const [aziendaId, setAziendaId] = useState<string>('');
   const [aziendaNome, setAziendaNome] = useState<string>('');
-  const [paese, setPaese] = useState<string>('Italia');
+  const [countrySelect, setCountrySelect] = useState<string>('Italia');
+  const [customCountry, setCustomCountry] = useState<string>('');
   const [dialCode, setDialCode] = useState<string>('+39');
   const [localPhone, setLocalPhone] = useState<string>('');
   const [email, setEmail] = useState<string>('');
@@ -93,12 +98,20 @@ export function ContactModal({
       .trim();
 
     const phoneParts = parseDialAndLocal(initialContact?.telefono);
+    const savedCountry = (initialContact?.paese || 'Italia').trim();
+    const isKnownCountry = COUNTRY_OPTIONS.some((c) => c.name === savedCountry && c.name !== 'Altro');
 
     setFullName(nameCombined);
     setRuolo(initialContact?.ruolo || '');
     setAziendaId(initialContact?.azienda_id || defaultAziendaId || '');
     setAziendaNome(initialContact?.azienda_nome || defaultAziendaNome || '');
-    setPaese(initialContact?.paese || 'Italia');
+    if (isKnownCountry) {
+      setCountrySelect(savedCountry);
+      setCustomCountry('');
+    } else {
+      setCountrySelect('Altro');
+      setCustomCountry(savedCountry);
+    }
     setDialCode(phoneParts.dial);
     setLocalPhone(phoneParts.local);
     setEmail(initialContact?.email || '');
@@ -107,8 +120,14 @@ export function ContactModal({
 
   if (!open) return null;
 
+  const effectiveCountry =
+    countrySelect === 'Altro' ? customCountry.trim() || null : countrySelect || null;
+
   const handleCountryChange = (nextCountryName: string) => {
-    setPaese(nextCountryName);
+    setCountrySelect(nextCountryName);
+    if (nextCountryName !== 'Altro') {
+      setCustomCountry('');
+    }
     const matched = COUNTRY_OPTIONS.find((c) => c.name === nextCountryName);
     if (matched && matched.dial) {
       setDialCode(matched.dial);
@@ -137,7 +156,7 @@ export function ContactModal({
       cognome,
       ruolo,
       telefono: combinedPhone || null,
-      paese: paese || null,
+      paese: effectiveCountry,
       email,
       note,
       aziendaId: aziendaId || null,
@@ -222,7 +241,7 @@ export function ContactModal({
                 Paese
               </label>
               <select
-                value={paese}
+                value={countrySelect}
                 onChange={(e) => handleCountryChange(e.target.value)}
                 className="mb-1.5 w-full rounded-xl border border-gray-700 bg-gray-950 px-3 py-2 text-xs text-white focus:border-[#FF5500] focus:outline-none"
               >
@@ -232,12 +251,12 @@ export function ContactModal({
                   </option>
                 ))}
               </select>
-              {paese === 'Altro' && (
+              {countrySelect === 'Altro' && (
                 <input
                   type="text"
-                  value={paese === 'Altro' ? '' : paese}
-                  onChange={(e) => setPaese(e.target.value)}
-                  placeholder="Specifica paese..."
+                  value={customCountry}
+                  onChange={(e) => setCustomCountry(e.target.value)}
+                  placeholder="Scrivi il paese..."
                   className="w-full rounded-xl border border-gray-700 bg-gray-950 px-3 py-2 text-xs text-white focus:border-[#FF5500] focus:outline-none"
                 />
               )}
@@ -263,18 +282,34 @@ export function ContactModal({
                 Telefono (Prefisso + Numero)
               </label>
               <div className="flex gap-2">
+                <select
+                  aria-label="Prefisso internazionale"
+                  value={DIAL_OPTIONS.some((d) => d.dial === dialCode) ? dialCode : ''}
+                  onChange={(e) => {
+                    if (e.target.value) setDialCode(e.target.value);
+                  }}
+                  className="w-24 shrink-0 rounded-xl border border-gray-700 bg-gray-950 px-2 py-2.5 font-mono text-xs text-white focus:border-[#FF5500] focus:outline-none"
+                >
+                  <option value="">Pref.</option>
+                  {DIAL_OPTIONS.map((d) => (
+                    <option key={d.dial} value={d.dial}>
+                      {d.dial}
+                    </option>
+                  ))}
+                </select>
                 <input
                   type="text"
                   value={dialCode}
                   onChange={(e) => setDialCode(e.target.value)}
-                  placeholder="+39 / +44 / +971"
-                  className="w-24 shrink-0 rounded-xl border border-gray-700 bg-gray-950 px-2.5 py-2.5 font-mono text-xs text-white focus:border-[#FF5500] focus:outline-none"
+                  placeholder="+39"
+                  aria-label="Prefisso manuale"
+                  className="w-16 shrink-0 rounded-xl border border-gray-700 bg-gray-950 px-2 py-2.5 font-mono text-xs text-white focus:border-[#FF5500] focus:outline-none"
                 />
                 <input
                   type="tel"
                   value={localPhone}
                   onChange={(e) => setLocalPhone(e.target.value)}
-                  placeholder="Numero di telefono..."
+                  placeholder="Numero..."
                   className="w-full rounded-xl border border-gray-700 bg-gray-950 px-3 py-2.5 text-xs text-white focus:border-[#FF5500] focus:outline-none"
                 />
               </div>

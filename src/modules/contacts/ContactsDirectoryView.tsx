@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   listAllContatti,
+  listAziendeOptions,
   upsertContatto,
   splitNomeCognome,
   type GosContatto,
@@ -14,19 +15,74 @@ interface ContactsDirectoryViewProps {
   aziendaNome?: string | null;
 }
 
+const COUNTRY_OPTIONS = [
+  { name: 'Italia', dial: '+39', iso: 'IT' },
+  { name: 'Regno Unito', dial: '+44', iso: 'GB' },
+  { name: 'Emirati Arabi Uniti', dial: '+971', iso: 'AE' },
+  { name: 'Svizzera', dial: '+41', iso: 'CH' },
+  { name: 'Germania', dial: '+49', iso: 'DE' },
+  { name: 'Francia', dial: '+33', iso: 'FR' },
+  { name: 'Spagna', dial: '+34', iso: 'ES' },
+  { name: 'Stati Uniti', dial: '+1', iso: 'US' },
+  { name: 'Uzbekistan', dial: '+998', iso: 'UZ' },
+  { name: 'Kazakistan', dial: '+7', iso: 'KZ' },
+  { name: 'Tagikistan', dial: '+992', iso: 'TJ' },
+  { name: 'Tunisia', dial: '+216', iso: 'TN' },
+  { name: 'Altro', dial: '', iso: 'INTL' },
+];
+
+const DIAL_OPTIONS = Array.from(
+  new Map(
+    COUNTRY_OPTIONS.filter((c) => c.dial).map((c) => [c.dial, `${c.dial} (${c.iso})`])
+  ).entries()
+).map(([dial, label]) => ({ dial, label }));
+
+function parseDialAndLocal(fullPhone?: string | null): { dial: string; local: string } {
+  const raw = String(fullPhone || '').trim();
+  if (!raw) return { dial: '+39', local: '' };
+
+  const sortedByDialLength = [...COUNTRY_OPTIONS]
+    .filter((c) => c.dial)
+    .sort((a, b) => b.dial.length - a.dial.length);
+
+  for (const c of sortedByDialLength) {
+    if (raw.startsWith(c.dial)) {
+      return {
+        dial: c.dial,
+        local: raw.slice(c.dial.length).trim(),
+      };
+    }
+  }
+
+  const match = raw.match(/^(\+\d{1,4})\s*(.*)$/);
+  if (match) {
+    return { dial: match[1], local: match[2].trim() };
+  }
+
+  return { dial: '', local: raw };
+}
+
 export function ContactsDirectoryView({
   aziendaId,
   aziendaNome,
 }: ContactsDirectoryViewProps) {
   const [contatti, setContatti] = useState<GosContatto[]>([]);
+  const [aziendeList, setAziendeList] = useState<
+    Array<{ id: string; ragione_sociale: string }>
+  >([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [fullNameInput, setFullNameInput] = useState('');
-  const [emailInput, setEmailInput] = useState('');
+  const [aziendaIdInput, setAziendaIdInput] = useState<string>(aziendaId || '');
+  const [aziendaNomeInput, setAziendaNomeInput] = useState<string>(aziendaNome || '');
+  const [countrySelect, setCountrySelect] = useState<string>('Italia');
+  const [customCountry, setCustomCountry] = useState<string>('');
+  const [dialCode, setDialCode] = useState<string>('+39');
   const [telefonoInput, setTelefonoInput] = useState('');
   const [ruoloInput, setRuoloInput] = useState('');
+  const [emailInput, setEmailInput] = useState('');
   const [noteInput, setNoteInput] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -41,31 +97,82 @@ export function ContactsDirectoryView({
     void loadContatti();
   }, [loadContatti]);
 
+  useEffect(() => {
+    if (!showAddModal) return;
+    void (async () => {
+      const rows = await listAziendeOptions();
+      setAziendeList(rows);
+    })();
+    setAziendaIdInput(aziendaId || '');
+    setAziendaNomeInput(aziendaNome || '');
+    setCountrySelect('Italia');
+    setCustomCountry('');
+    setDialCode('+39');
+  }, [showAddModal, aziendaId, aziendaNome]);
+
+  const resetModalForm = () => {
+    setFullNameInput('');
+    setAziendaIdInput(aziendaId || '');
+    setAziendaNomeInput(aziendaNome || '');
+    setCountrySelect('Italia');
+    setCustomCountry('');
+    setDialCode('+39');
+    setTelefonoInput('');
+    setRuoloInput('');
+    setEmailInput('');
+    setNoteInput('');
+  };
+
+  const handleCountryChange = (nextCountryName: string) => {
+    setCountrySelect(nextCountryName);
+    if (nextCountryName !== 'Altro') {
+      setCustomCountry('');
+    }
+    const matched = COUNTRY_OPTIONS.find((c) => c.name === nextCountryName);
+    if (matched && matched.dial) {
+      setDialCode(matched.dial);
+    }
+  };
+
+  const handleAziendaSelect = (selectedId: string) => {
+    setAziendaIdInput(selectedId);
+    const found = aziendeList.find((a) => a.id === selectedId);
+    if (found) {
+      setAziendaNomeInput(found.ragione_sociale);
+    }
+  };
+
   const handleSaveContatto = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!fullNameInput.trim()) return;
 
     setSaving(true);
     const { nome, cognome } = splitNomeCognome(fullNameInput);
+    const combinedPhone = [dialCode.trim(), telefonoInput.trim()]
+      .filter(Boolean)
+      .join(' ')
+      .trim();
+    const effectiveCountry =
+      countrySelect === 'Altro'
+        ? customCountry.trim() || null
+        : countrySelect || null;
+
     const saved = await upsertContatto({
       nome,
       cognome,
       email: emailInput.trim() || null,
-      telefono: telefonoInput.trim() || null,
+      telefono: combinedPhone || null,
+      paese: effectiveCountry,
       ruolo: ruoloInput.trim() || null,
-      aziendaId: aziendaId || null,
-      aziendaNome: aziendaNome || null,
+      aziendaId: aziendaIdInput.trim() || aziendaId || null,
+      aziendaNome: aziendaNomeInput.trim() || aziendaNome || null,
       origine: 'manuale',
       note: noteInput.trim() || null,
     });
 
     setSaving(false);
     if (saved) {
-      setFullNameInput('');
-      setEmailInput('');
-      setTelefonoInput('');
-      setRuoloInput('');
-      setNoteInput('');
+      resetModalForm();
       setShowAddModal(false);
       await loadContatti();
     } else {
@@ -76,7 +183,15 @@ export function ContactsDirectoryView({
   const filtered = contatti.filter((c) => {
     const q = searchQuery.trim().toLowerCase();
     if (!q) return true;
-    return [c.nome_completo, c.email, c.telefono, c.ruolo, c.azienda_nome, c.origine]
+    return [
+      c.nome_completo,
+      c.email,
+      c.telefono,
+      c.paese,
+      c.ruolo,
+      c.azienda_nome,
+      c.origine,
+    ]
       .filter(Boolean)
       .join(' ')
       .toLowerCase()
@@ -142,6 +257,7 @@ export function ContactsDirectoryView({
                 <th className="px-4 py-3">Ruolo</th>
                 <th className="px-4 py-3">Email</th>
                 <th className="px-4 py-3">Telefono</th>
+                <th className="px-4 py-3">Paese</th>
                 <th className="px-4 py-3">Origine</th>
               </tr>
             </thead>
@@ -155,6 +271,7 @@ export function ContactsDirectoryView({
                   <td className="px-4 py-3 text-gray-300">{c.ruolo || '-'}</td>
                   <td className="px-4 py-3 font-mono text-gray-300">{c.email || '-'}</td>
                   <td className="px-4 py-3 font-mono text-gray-400">{c.telefono || '-'}</td>
+                  <td className="px-4 py-3 text-gray-300">{c.paese || '-'}</td>
                   <td className="px-4 py-3">
                     <span className="px-2 py-0.5 bg-gray-900 border border-gray-700 text-[#FF5500] text-[10px] font-mono rounded uppercase">
                       {c.origine || 'manuale'}
@@ -200,11 +317,82 @@ export function ContactsDirectoryView({
                 onSelectContact={(existing) => {
                   setFullNameInput(existing.nome_completo);
                   if (existing.email) setEmailInput(existing.email);
-                  if (existing.telefono) setTelefonoInput(existing.telefono);
+                  if (existing.telefono) {
+                    const parsed = parseDialAndLocal(existing.telefono);
+                    setDialCode(parsed.dial);
+                    setTelefonoInput(parsed.local);
+                  }
+                  if (existing.paese) {
+                    const isKnown = COUNTRY_OPTIONS.some(
+                      (c) => c.name === existing.paese && c.name !== 'Altro'
+                    );
+                    if (isKnown) {
+                      setCountrySelect(existing.paese);
+                      setCustomCountry('');
+                    } else {
+                      setCountrySelect('Altro');
+                      setCustomCountry(existing.paese);
+                    }
+                  }
+                  if (existing.azienda_id) setAziendaIdInput(existing.azienda_id);
+                  if (existing.azienda_nome) setAziendaNomeInput(existing.azienda_nome);
                   if (existing.ruolo) setRuoloInput(existing.ruolo);
                   if (existing.note) setNoteInput(existing.note);
                 }}
               />
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-gray-400 mb-1 font-bold uppercase text-[10px]">
+                    Azienda
+                  </label>
+                  <select
+                    value={aziendaIdInput}
+                    onChange={(e) => handleAziendaSelect(e.target.value)}
+                    className="mb-1.5 w-full bg-gray-950 border border-gray-700 px-3 py-2 rounded-xl text-white text-xs focus:outline-none focus:border-[#FF5500]"
+                  >
+                    <option value="">-- Seleziona da aziende --</option>
+                    {aziendeList.map((az) => (
+                      <option key={az.id} value={az.id}>
+                        {az.ragione_sociale}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    type="text"
+                    placeholder="Oppure scrivi nome azienda..."
+                    value={aziendaNomeInput}
+                    onChange={(e) => setAziendaNomeInput(e.target.value)}
+                    className="w-full bg-gray-950 border border-gray-700 px-3.5 py-2 rounded-xl text-white text-xs focus:outline-none focus:border-[#FF5500]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-gray-400 mb-1 font-bold uppercase text-[10px]">
+                    Paese
+                  </label>
+                  <select
+                    value={countrySelect}
+                    onChange={(e) => handleCountryChange(e.target.value)}
+                    className="mb-1.5 w-full bg-gray-950 border border-gray-700 px-3 py-2 rounded-xl text-white text-xs focus:outline-none focus:border-[#FF5500]"
+                  >
+                    {COUNTRY_OPTIONS.map((c) => (
+                      <option key={c.name} value={c.name}>
+                        {c.name} {c.dial ? `(${c.dial})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                  {countrySelect === 'Altro' && (
+                    <input
+                      type="text"
+                      placeholder="Scrivi il paese..."
+                      value={customCountry}
+                      onChange={(e) => setCustomCountry(e.target.value)}
+                      className="w-full bg-gray-950 border border-gray-700 px-3.5 py-2 rounded-xl text-white text-xs focus:outline-none focus:border-[#FF5500]"
+                    />
+                  )}
+                </div>
+              </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
@@ -222,15 +410,40 @@ export function ContactsDirectoryView({
 
                 <div>
                   <label className="block text-gray-400 mb-1 font-bold uppercase text-[10px]">
-                    Telefono
+                    Telefono (Prefisso + Numero)
                   </label>
-                  <input
-                    type="text"
-                    placeholder="+39 ..."
-                    value={telefonoInput}
-                    onChange={(e) => setTelefonoInput(e.target.value)}
-                    className="w-full bg-gray-950 border border-gray-700 px-3.5 py-2.5 rounded-xl text-white text-xs focus:outline-none focus:border-[#FF5500]"
-                  />
+                  <div className="flex gap-2">
+                    <select
+                      aria-label="Prefisso internazionale"
+                      value={DIAL_OPTIONS.some((d) => d.dial === dialCode) ? dialCode : ''}
+                      onChange={(e) => {
+                        if (e.target.value) setDialCode(e.target.value);
+                      }}
+                      className="w-20 shrink-0 bg-gray-950 border border-gray-700 px-2 py-2.5 rounded-xl text-white font-mono text-xs focus:outline-none focus:border-[#FF5500]"
+                    >
+                      <option value="">Pref.</option>
+                      {DIAL_OPTIONS.map((d) => (
+                        <option key={d.dial} value={d.dial}>
+                          {d.dial}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      type="text"
+                      placeholder="+39"
+                      aria-label="Prefisso manuale"
+                      value={dialCode}
+                      onChange={(e) => setDialCode(e.target.value)}
+                      className="w-16 shrink-0 bg-gray-950 border border-gray-700 px-2 py-2.5 rounded-xl text-white font-mono text-xs focus:outline-none focus:border-[#FF5500]"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Numero..."
+                      value={telefonoInput}
+                      onChange={(e) => setTelefonoInput(e.target.value)}
+                      className="w-full bg-gray-950 border border-gray-700 px-3 py-2.5 rounded-xl text-white text-xs focus:outline-none focus:border-[#FF5500]"
+                    />
+                  </div>
                 </div>
               </div>
 

@@ -516,3 +516,4 @@ export const businessReportService = {
     window.open(doc.output('bloburl'), '_blank');
   }
 };
+

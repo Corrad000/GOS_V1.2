@@ -1,5 +1,7 @@
 import React from 'react';
-import { KybQuestionnaireView } from '@/modules/kyb/KybQuestionnaireView';
+import { KybQuestionnaireView } from '@/app/kyb/KybQuestionnaireView';
+
+export const dynamic = 'force-dynamic';
 
 interface KybClientPageProps {
   params: Promise<{ token: string }>;

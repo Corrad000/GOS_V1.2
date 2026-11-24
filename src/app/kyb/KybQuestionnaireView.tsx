@@ -17,9 +17,12 @@ import {
   type KybStato,
 } from './kybService';
 
-interface KybQuestionnaireViewProps {
-  companyCode: string;
+export interface KybQuestionnaireViewProps {
+  companyCode?: string;
   aziendaId?: string | null;
+  companyId?: string | null;
+  companyName?: string;
+  ragioneSociale?: string;
   companySeed?: Parameters<typeof buildEmptyKybPayload>[0];
   initialSubmission?: GosKybSubmission | null;
   clientToken?: string;
@@ -34,13 +37,24 @@ type SectionTab =
   | 'dichiarazione';
 
 export function KybQuestionnaireView({
-  companyCode,
+  companyCode = '',
   aziendaId,
+  companyId,
+  companyName,
+  ragioneSociale,
   companySeed,
   initialSubmission = null,
   clientToken,
   clientMode = false,
 }: KybQuestionnaireViewProps) {
+  const resolvedAziendaId = aziendaId ?? companyId ?? null;
+  const resolvedCompanyCode = (companyCode || resolvedAziendaId || 'KYB').trim();
+  const resolvedSeed: Parameters<typeof buildEmptyKybPayload>[0] = {
+    ...(companySeed || {}),
+    ragione_sociale:
+      companySeed?.ragione_sociale || companyName || ragioneSociale || '',
+  };
+
   const [submissions, setSubmissions] = useState<GosKybSubmission[]>(
     initialSubmission ? [initialSubmission] : []
   );
@@ -54,28 +68,28 @@ export function KybQuestionnaireView({
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
   const [anagrafica, setAnagrafica] = useState<KybAnagraficaDati>(() => {
-    const base = buildEmptyKybPayload(companySeed).anagrafica_dati;
+    const base = buildEmptyKybPayload(resolvedSeed).anagrafica_dati;
     return initialSubmission?.anagrafica_dati
       ? { ...base, ...initialSubmission.anagrafica_dati }
       : base;
   });
 
   const [societaUbo, setSocietaUbo] = useState<KybSocietaUboDati>(() => {
-    const base = buildEmptyKybPayload(companySeed).societa_ubo_dati;
+    const base = buildEmptyKybPayload(resolvedSeed).societa_ubo_dati;
     return initialSubmission?.societa_ubo_dati
       ? { ...base, ...initialSubmission.societa_ubo_dati }
       : base;
   });
 
   const [operativitaFondi, setOperativitaFondi] = useState<KybOperativitaFondiDati>(() => {
-    const base = buildEmptyKybPayload(companySeed).operativita_fondi_dati;
+    const base = buildEmptyKybPayload(resolvedSeed).operativita_fondi_dati;
     return initialSubmission?.operativita_fondi_dati
       ? { ...base, ...initialSubmission.operativita_fondi_dati }
       : base;
   });
 
   const [pacchetto, setPacchetto] = useState<KybPacchettoCompleto>(() =>
-    hydratePacchettoCompleto(initialSubmission?.pacchetto_completo, companySeed)
+    hydratePacchettoCompleto(initialSubmission?.pacchetto_completo, resolvedSeed)
   );
 
   const [stato, setStato] = useState<string>(initialSubmission?.stato || 'Bozza');
@@ -85,20 +99,25 @@ export function KybQuestionnaireView({
 
   const hydrateFormFromSubmission = useCallback(
     (sub: GosKybSubmission) => {
-      const defaults = buildEmptyKybPayload(companySeed);
+      const defaults = buildEmptyKybPayload(resolvedSeed);
       setActiveSub(sub);
       setNotFoundToken(false);
       setStato(sub.stato || 'Bozza');
       setConformitaNote(sub.conformita_note || '');
-      setAnagrafica({ ...defaults.anagrafica_dati, ...(sub.anagrafica_dati || {}) });
+      setAnagrafica({
+        ...defaults.anagrafica_dati,
+        ...(sub.anagrafica_dati || {}),
+        ragione_sociale:
+          sub.anagrafica_dati?.ragione_sociale || defaults.anagrafica_dati.ragione_sociale,
+      });
       setSocietaUbo({ ...defaults.societa_ubo_dati, ...(sub.societa_ubo_dati || {}) });
       setOperativitaFondi({
         ...defaults.operativita_fondi_dati,
         ...(sub.operativita_fondi_dati || {}),
       });
-      setPacchetto(hydratePacchettoCompleto(sub.pacchetto_completo, companySeed));
+      setPacchetto(hydratePacchettoCompleto(sub.pacchetto_completo, resolvedSeed));
     },
-    [companySeed]
+    [resolvedSeed]
   );
 
   const loadSubmissions = useCallback(async () => {
@@ -123,26 +142,32 @@ export function KybQuestionnaireView({
     }
 
     setLoading(true);
-    const rows = await listKybSubmissions(companyCode, aziendaId || null);
+    const rows = await listKybSubmissions(resolvedCompanyCode, resolvedAziendaId);
     setSubmissions(rows);
     if (rows.length > 0) {
       hydrateFormFromSubmission(rows[0]);
     }
     setLoading(false);
-  }, [clientMode, clientToken, initialSubmission, companyCode, aziendaId, hydrateFormFromSubmission]);
+  }, [
+    clientMode,
+    clientToken,
+    initialSubmission,
+    resolvedCompanyCode,
+    resolvedAziendaId,
+    hydrateFormFromSubmission,
+  ]);
 
   useEffect(() => {
     void loadSubmissions();
   }, [loadSubmissions]);
 
   const handleCreateNewKyb = async () => {
-    const effectiveCode = companyCode || aziendaId || 'KYB';
     setCreating(true);
     setStatusMessage(null);
     const created = await createKybSubmission({
-      aziendaId: aziendaId || null,
-      companyCode: effectiveCode,
-      companySeed,
+      aziendaId: resolvedAziendaId,
+      companyCode: resolvedCompanyCode,
+      companySeed: resolvedSeed,
     });
     setCreating(false);
 
@@ -183,8 +208,8 @@ export function KybQuestionnaireView({
       operativita_fondi_dati: operativitaFondi,
       pacchetto_completo: pacchetto,
       conformita_note: conformitaNote,
-      aziendaId: activeSub.azienda_id || aziendaId || null,
-      companyCode: activeSub.company_code || companyCode || null,
+      aziendaId: activeSub.azienda_id || resolvedAziendaId,
+      companyCode: activeSub.company_code || resolvedCompanyCode,
       markSubmitted,
     });
 
@@ -1190,3 +1215,5 @@ export function KybQuestionnaireView({
     </div>
   );
 }
+
+export default KybQuestionnaireView;

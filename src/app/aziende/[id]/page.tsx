@@ -30,7 +30,8 @@ import {
   splitNomeCognome,
   type GosContatto,
 } from '@/modules/contacts/contactsService';
-import { KybQuestionnaireView } from '@/modules/kyb/KybQuestionnaireView';
+import { KybQuestionnaireView } from '@/app/kyb/KybQuestionnaireView';
+import { listInvoices, type GosInvoiceRecord } from '@/modules/invoices/invoiceService';
 
 import { DocumentsView } from '@/modules/project-management/DocumentsView';
 
@@ -103,6 +104,7 @@ function CompanyPageContent() {
   });
 
   const [companyContacts, setCompanyContacts] = useState<GosContatto[]>([]);
+  const [companyInvoices, setCompanyInvoices] = useState<GosInvoiceRecord[]>([]);
 
   const [isEditingAnagrafica, setIsEditingAnagrafica] = useState(false);
   const [activeQuestionario, setActiveQuestionario] = useState<any>(null);
@@ -232,9 +234,10 @@ function CompanyPageContent() {
         if (cancelled) return;
 
         if (data) {
+          const resolvedName = data.ragione_sociale || 'Azienda senza nome';
           setCompanyData({
             id: data.id,
-            ragione_sociale: data.ragione_sociale || 'Azienda senza nome',
+            ragione_sociale: resolvedName,
             codice_azienda: data.codice_azienda || data.id,
             partita_iva: data.partita_iva || '',
             codice_fiscale: data.codice_fiscale || '',
@@ -262,13 +265,25 @@ function CompanyPageContent() {
               telefono: data.telefono || null,
               ruolo: 'Referente Aziendale',
               aziendaId: data.id,
-              aziendaNome: data.ragione_sociale || null,
+              aziendaNome: resolvedName,
               origine: 'anagrafica',
             });
           }
 
-          const loadedContacts = await listAllContatti(data.id);
-          if (!cancelled) setCompanyContacts(loadedContacts);
+          const [loadedContacts, allInvoices] = await Promise.all([
+            listAllContatti(data.id),
+            listInvoices(),
+          ]);
+
+          if (!cancelled) {
+            setCompanyContacts(loadedContacts);
+            const normName = resolvedName.trim().toLowerCase();
+            const matchingInvoices = allInvoices.filter((inv) => {
+              if (inv.azienda_id && String(inv.azienda_id) === String(data.id)) return true;
+              return normName && String(inv.customer_name || '').trim().toLowerCase() === normName;
+            });
+            setCompanyInvoices(matchingInvoices);
+          }
         } else {
           setCompanyError('Azienda non trovata su Supabase.');
         }
@@ -974,7 +989,7 @@ function CompanyPageContent() {
         </div>
 
         {activeTab === 'anagrafica' && (
-          <div>
+          <div className="space-y-6">
             {!isEditingAnagrafica ? (
               <AnagraficaView
                 company={companyData}
@@ -1034,6 +1049,63 @@ function CompanyPageContent() {
                 onCancel={() => setIsEditingAnagrafica(false)}
               />
             )}
+
+            <div className="rounded-2xl border border-gray-800 bg-gray-900 p-6 space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-800 pb-3">
+                <div>
+                  <h3 className="text-sm font-extrabold uppercase tracking-wider text-white">
+                    Fatture Emesse ({companyInvoices.length})
+                  </h3>
+                  <p className="text-xs text-gray-400">
+                    Storico fatture intestate a {companyData.ragione_sociale}.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => router.push('/dashboard')}
+                  className="cursor-pointer rounded-xl border border-gray-700 bg-gray-950 px-3.5 py-2 text-xs font-bold text-gray-200 hover:border-[#FF5500]"
+                >
+                  Apri Invoice Generator
+                </button>
+              </div>
+
+              {companyInvoices.length === 0 ? (
+                <p className="text-xs text-gray-400">
+                  Nessuna fattura registrata per questa azienda.
+                </p>
+              ) : (
+                <div className="overflow-x-auto rounded-xl border border-gray-800 bg-gray-950">
+                  <table className="w-full border-collapse text-left text-xs">
+                    <thead>
+                      <tr className="border-b border-gray-800 bg-gray-900/70 text-[10px] uppercase text-gray-400">
+                        <th className="px-4 py-2.5">Numero</th>
+                        <th className="px-4 py-2.5">Data</th>
+                        <th className="px-4 py-2.5">Scadenza</th>
+                        <th className="px-4 py-2.5">Stato</th>
+                        <th className="px-4 py-2.5 text-right">Totale</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-800/80">
+                      {companyInvoices.map((inv) => (
+                        <tr key={inv.id || inv.invoice_number}>
+                          <td className="px-4 py-2.5 font-mono font-bold text-white">
+                            {inv.invoice_number}
+                          </td>
+                          <td className="px-4 py-2.5 font-mono text-gray-400">{inv.issue_date}</td>
+                          <td className="px-4 py-2.5 font-mono text-gray-400">{inv.due_date}</td>
+                          <td className="px-4 py-2.5 uppercase font-semibold text-emerald-300">
+                            {inv.status}
+                          </td>
+                          <td className="px-4 py-2.5 text-right font-mono font-bold text-white">
+                            {inv.currency} {Number(inv.gross_total || 0).toFixed(2)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
