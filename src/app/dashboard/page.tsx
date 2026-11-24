@@ -9,6 +9,7 @@ import CalendarLogToolbarButton from '@/app/components/CalendarLogToolbarButton'
 import Footer from '@/app/components/Footer';
 import type { Fase, Voce } from '@/app/utenti/[id]/RiepilogoKanbanDash';
 import type { StatoAzione } from '@/modules/offer-builder/card-trattativa';
+import { normalizeGosRole } from '@/utils/gosPermissions';
 
 function normalizzaFaseServer(raw?: string): Fase {
   const v = String(raw || '').toLowerCase().trim();
@@ -71,18 +72,21 @@ export default async function AdminDashboardPage() {
   // 2. Legge il profilo dinamico dalla tabella gos_profiles
   const { data: profile } = await supabase
     .from('gos_profiles')
-    .select('role, is_admin, email, nome')
+    .select('*')
     .eq('id', user.id)
-    .single();
+    .maybeSingle();
 
-  const isAdmin =
-    profile?.is_admin === true ||
-    profile?.role === 'admin' ||
-    profile?.role === 'Administrator' ||
-    profile?.role === 'amministratore';
-
-  const userRole = isAdmin ? 'admin' : 'user';
-  const userName = profile?.nome || profile?.email || user.email || 'Utente Network';
+  const rawRole =
+    profile?.ruolo ||
+    profile?.role ||
+    (profile?.is_admin === true ? 'superadmin' : 'user Guest');
+  const userRole = normalizeGosRole(rawRole);
+  const userName =
+    profile?.full_name ||
+    profile?.nome ||
+    profile?.email ||
+    user.email ||
+    'Utente Network';
 
   // 3. Recupero aziende da gos_aziende
   let companiesList: any[] = [];

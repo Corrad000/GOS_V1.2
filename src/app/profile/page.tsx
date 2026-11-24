@@ -5,10 +5,28 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { createBrowserClient } from '@supabase/ssr';
 import {
+  AZIENDA_TAB_ITEMS,
+  CRUSCOTTO_TAB_ITEMS,
   GOS_ROLES,
+  applyCascadePermissions,
+  createEmptyAziendaTabPermissions,
+  createEmptyTabPermissions,
   normalizeGosRole,
   resolveGosPermissions,
+  type AziendaTabKey,
+  type AziendaTabPermissionsMap,
+  type CruscottoTabKey,
+  type OperationalFlagsState,
+  type SectionPermissionsState,
+  type TabPermissionAction,
+  type TabPermissionsMap,
 } from '@/utils/gosPermissions';
+
+const TAB_ACTIONS: Array<{ key: TabPermissionAction; label: string }> = [
+  { key: 'read', label: 'Lettura' },
+  { key: 'edit', label: 'Modifica' },
+  { key: 'delete', label: 'Eliminazione' },
+];
 
 function ProfilePageContent() {
   const searchParams = useSearchParams();
@@ -26,7 +44,7 @@ function ProfilePageContent() {
   const [email, setEmail] = useState('');
   const [ruolo, setRuolo] = useState<string>('user Guest');
   const [stato, setStato] = useState('ATTIVO');
-  const [permessi, setPermessi] = useState({
+  const [permessi, setPermessi] = useState<SectionPermissionsState>({
     aziende: true,
     questionari: true,
     offerte: true,
@@ -34,6 +52,7 @@ function ProfilePageContent() {
   });
 
   // Permessi granulari modificabili direttamente dal GOS
+  const [canEditAziende, setCanEditAziende] = useState(false);
   const [canDeleteAziende, setCanDeleteAziende] = useState(false);
   const [canEditOfferte, setCanEditOfferte] = useState(false);
   const [canDeleteOfferte, setCanDeleteOfferte] = useState(false);
@@ -41,6 +60,11 @@ function ProfilePageContent() {
   const [canDeleteProgetti, setCanDeleteProgetti] = useState(false);
   const [canDeleteDocumenti, setCanDeleteDocumenti] = useState(false);
   const [canDeleteFile, setCanDeleteFile] = useState(false);
+  const [tabPermissions, setTabPermissions] = useState<TabPermissionsMap>(() =>
+    createEmptyTabPermissions()
+  );
+  const [aziendaTabPermissions, setAziendaTabPermissions] =
+    useState<AziendaTabPermissionsMap>(() => createEmptyAziendaTabPermissions());
 
   const supabase = useMemo(
     () =>
@@ -118,7 +142,10 @@ function ProfilePageContent() {
           const normalizedRole = normalizeGosRole(
             targetRow.ruolo || targetRow.role || 'user Guest'
           );
-          const defaults = resolveGosPermissions({ ruolo: normalizedRole });
+          const resolved = resolveGosPermissions({
+            ...targetRow,
+            ruolo: normalizedRole,
+          });
 
           setProfile(targetRow);
           setUtente(targetRow.full_name || targetRow.nome || '');
@@ -132,41 +159,48 @@ function ProfilePageContent() {
             utenti: targetRow.permessi?.utenti ?? normalizedRole === 'superadmin',
           });
 
+          setCanEditAziende(
+            typeof targetRow.can_edit_aziende === 'boolean'
+              ? targetRow.can_edit_aziende
+              : resolved.canEditAziende
+          );
           setCanDeleteAziende(
             typeof targetRow.can_delete_aziende === 'boolean'
               ? targetRow.can_delete_aziende
-              : defaults.canDeleteAziende
+              : resolved.canDeleteAziende
           );
           setCanEditOfferte(
             typeof targetRow.can_edit_offerte === 'boolean'
               ? targetRow.can_edit_offerte
-              : defaults.canEditOfferte
+              : resolved.canEditOfferte
           );
           setCanDeleteOfferte(
             typeof targetRow.can_delete_offerte === 'boolean'
               ? targetRow.can_delete_offerte
-              : defaults.canDeleteOfferte
+              : resolved.canDeleteOfferte
           );
           setCanExportData(
             typeof targetRow.can_export_data === 'boolean'
               ? targetRow.can_export_data
-              : defaults.canExportData
+              : resolved.canExportData
           );
           setCanDeleteProgetti(
             typeof targetRow.can_delete_progetti === 'boolean'
               ? targetRow.can_delete_progetti
-              : defaults.canDeleteProgetti
+              : resolved.canDeleteProgetti
           );
           setCanDeleteDocumenti(
             typeof targetRow.can_delete_documenti === 'boolean'
               ? targetRow.can_delete_documenti
-              : defaults.canDeleteDocumenti
+              : resolved.canDeleteDocumenti
           );
           setCanDeleteFile(
             typeof targetRow.can_delete_file === 'boolean'
               ? targetRow.can_delete_file
-              : defaults.canDeleteFile
+              : resolved.canDeleteFile
           );
+          setTabPermissions(resolved.tabPermissions);
+          setAziendaTabPermissions(resolved.aziendaTabPermissions);
         }
       } catch (err: any) {
         if (active) {
@@ -185,10 +219,44 @@ function ProfilePageContent() {
     };
   }, [targetIdFromQuery, supabase]);
 
+  const applyCascadedState = (
+    nextSource: Parameters<typeof applyCascadePermissions>[0]['source']
+  ) => {
+    const result = applyCascadePermissions({
+      source: nextSource,
+      tabPermissions,
+      aziendaTabPermissions,
+      sections: permessi,
+      operational: {
+        canEditAziende,
+        canDeleteAziende,
+        canEditOfferte,
+        canDeleteOfferte,
+        canExportData,
+        canDeleteProgetti,
+        canDeleteDocumenti,
+        canDeleteFile,
+      },
+    });
+
+    setTabPermissions(result.tabPermissions);
+    setAziendaTabPermissions(result.aziendaTabPermissions);
+    setPermessi(result.sections);
+    setCanEditAziende(result.operational.canEditAziende);
+    setCanDeleteAziende(result.operational.canDeleteAziende);
+    setCanEditOfferte(result.operational.canEditOfferte);
+    setCanDeleteOfferte(result.operational.canDeleteOfferte);
+    setCanExportData(result.operational.canExportData);
+    setCanDeleteProgetti(result.operational.canDeleteProgetti);
+    setCanDeleteDocumenti(result.operational.canDeleteDocumenti);
+    setCanDeleteFile(result.operational.canDeleteFile);
+  };
+
   const handleRoleChange = (nextRoleRaw: string) => {
     const nextRole = normalizeGosRole(nextRoleRaw);
     const defaults = resolveGosPermissions({ ruolo: nextRole });
     setRuolo(nextRole);
+    setCanEditAziende(defaults.canEditAziende);
     setCanDeleteAziende(defaults.canDeleteAziende);
     setCanEditOfferte(defaults.canEditOfferte);
     setCanDeleteOfferte(defaults.canDeleteOfferte);
@@ -196,9 +264,69 @@ function ProfilePageContent() {
     setCanDeleteProgetti(defaults.canDeleteProgetti);
     setCanDeleteDocumenti(defaults.canDeleteDocumenti);
     setCanDeleteFile(defaults.canDeleteFile);
+    setTabPermissions(defaults.tabPermissions);
+    setAziendaTabPermissions(defaults.aziendaTabPermissions);
     if (nextRole === 'superadmin') {
       setPermessi((prev) => ({ ...prev, utenti: true }));
     }
+  };
+
+  const handleToggleCruscottoTabFlag = (
+    tabKey: CruscottoTabKey,
+    action: TabPermissionAction,
+    checked: boolean
+  ) => {
+    applyCascadedState({
+      kind: 'cruscotto_tab',
+      tabKey,
+      action,
+      checked,
+    });
+  };
+
+  const handleToggleCruscottoTabRow = (tabKey: CruscottoTabKey, checked: boolean) => {
+    applyCascadedState({
+      kind: 'cruscotto_row',
+      tabKey,
+      checked,
+    });
+  };
+
+  const handleToggleAziendaTabFlag = (
+    tabKey: AziendaTabKey,
+    action: TabPermissionAction,
+    checked: boolean
+  ) => {
+    applyCascadedState({
+      kind: 'azienda_tab',
+      tabKey,
+      action,
+      checked,
+    });
+  };
+
+  const handleToggleAziendaTabRow = (tabKey: AziendaTabKey, checked: boolean) => {
+    applyCascadedState({
+      kind: 'azienda_row',
+      tabKey,
+      checked,
+    });
+  };
+
+  const handleToggleSection = (sectionKey: keyof SectionPermissionsState, checked: boolean) => {
+    applyCascadedState({
+      kind: 'section',
+      sectionKey,
+      checked,
+    });
+  };
+
+  const handleToggleOperational = (flagKey: keyof OperationalFlagsState, checked: boolean) => {
+    applyCascadedState({
+      kind: 'operational',
+      flagKey,
+      checked,
+    });
   };
 
   const handleSave = async (e: React.FormEvent) => {
@@ -219,6 +347,7 @@ function ProfilePageContent() {
             ruolo: normalizedRole,
             stato,
             permessi,
+            can_edit_aziende: canEditAziende,
             can_delete_aziende: canDeleteAziende,
             can_edit_offerte: canEditOfferte,
             can_delete_offerte: canDeleteOfferte,
@@ -226,6 +355,8 @@ function ProfilePageContent() {
             can_delete_progetti: canDeleteProgetti,
             can_delete_documenti: canDeleteDocumenti,
             can_delete_file: canDeleteFile,
+            tab_permissions: tabPermissions,
+            azienda_tab_permissions: aziendaTabPermissions,
           },
         }),
       });
@@ -306,41 +437,50 @@ function ProfilePageContent() {
         profile.email &&
         loggedInProfile.email.toLowerCase() === profile.email.toLowerCase()));
 
-  const granularPermissions = [
+  const granularPermissions: Array<{
+    label: string;
+    checked: boolean;
+    onChange: (checked: boolean) => void;
+  }> = [
+    {
+      label: 'Modificare Aziende (can_edit_aziende)',
+      checked: canEditAziende,
+      onChange: (checked) => handleToggleOperational('canEditAziende', checked),
+    },
     {
       label: 'Eliminare Aziende (can_delete_aziende)',
       checked: canDeleteAziende,
-      onChange: setCanDeleteAziende,
+      onChange: (checked) => handleToggleOperational('canDeleteAziende', checked),
     },
     {
       label: 'Modificare Offerte (can_edit_offerte)',
       checked: canEditOfferte,
-      onChange: setCanEditOfferte,
+      onChange: (checked) => handleToggleOperational('canEditOfferte', checked),
     },
     {
       label: 'Eliminare Offerte (can_delete_offerte)',
       checked: canDeleteOfferte,
-      onChange: setCanDeleteOfferte,
+      onChange: (checked) => handleToggleOperational('canDeleteOfferte', checked),
     },
     {
       label: 'Esportare Dati (can_export_data)',
       checked: canExportData,
-      onChange: setCanExportData,
+      onChange: (checked) => handleToggleOperational('canExportData', checked),
     },
     {
       label: 'Eliminare Progetti (can_delete_progetti)',
       checked: canDeleteProgetti,
-      onChange: setCanDeleteProgetti,
+      onChange: (checked) => handleToggleOperational('canDeleteProgetti', checked),
     },
     {
       label: 'Eliminare Documenti (can_delete_documenti)',
       checked: canDeleteDocumenti,
-      onChange: setCanDeleteDocumenti,
+      onChange: (checked) => handleToggleOperational('canDeleteDocumenti', checked),
     },
     {
       label: 'Eliminare File (can_delete_file)',
       checked: canDeleteFile,
-      onChange: setCanDeleteFile,
+      onChange: (checked) => handleToggleOperational('canDeleteFile', checked),
     },
   ];
 
@@ -357,8 +497,11 @@ function ProfilePageContent() {
         'stato',
         'status',
         'permessi',
+        'tab_permissions',
+        'azienda_tab_permissions',
         'is_online',
         'last_seen_at',
+        'can_edit_aziende',
         'can_delete_aziende',
         'can_edit_offerte',
         'can_delete_offerte',
@@ -487,6 +630,134 @@ function ProfilePageContent() {
 
           <div>
             <label className="block text-gray-400 mb-2 font-bold uppercase text-[10px]">
+              Permessi Cruscotto Operativo per Tab (Lettura · Modifica · Eliminazione)
+            </label>
+            <div className="overflow-x-auto bg-gray-950 border border-gray-800 rounded-none">
+              <table className="w-full border-collapse text-left text-xs">
+                <thead>
+                  <tr className="border-b border-gray-800 bg-gray-900/80 text-[10px] font-bold uppercase text-gray-400">
+                    <th className="px-3 py-2">Tab Cruscotto</th>
+                    {TAB_ACTIONS.map((act) => (
+                      <th key={act.key} className="px-3 py-2 text-center">
+                        {act.label}
+                      </th>
+                    ))}
+                    <th className="px-3 py-2 text-right">Riga</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-800/80">
+                  {CRUSCOTTO_TAB_ITEMS.map((tab) => {
+                    const flags = tabPermissions[tab.key] || {
+                      read: false,
+                      edit: false,
+                      delete: false,
+                    };
+                    const allChecked = flags.read && flags.edit && flags.delete;
+
+                    return (
+                      <tr key={tab.key}>
+                        <td className="px-3 py-2 font-semibold text-gray-200">{tab.label}</td>
+                        {TAB_ACTIONS.map((act) => (
+                          <td key={act.key} className="px-3 py-2 text-center">
+                            <label className="inline-flex items-center justify-center gap-1.5 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                disabled={!isSuperAdmin}
+                                checked={Boolean(flags[act.key])}
+                                onChange={(e) =>
+                                  handleToggleCruscottoTabFlag(tab.key, act.key, e.target.checked)
+                                }
+                                aria-label={`${tab.label} ${act.label}`}
+                                className="rounded-none disabled:opacity-60"
+                              />
+                              <span className="text-[11px] text-gray-300">{act.label}</span>
+                            </label>
+                          </td>
+                        ))}
+                        <td className="px-3 py-2 text-right">
+                          <button
+                            type="button"
+                            disabled={!isSuperAdmin}
+                            onClick={() => handleToggleCruscottoTabRow(tab.key, !allChecked)}
+                            className="px-2 py-1 bg-gray-800 hover:bg-gray-700 text-[10px] font-bold uppercase text-gray-200 rounded-none cursor-pointer disabled:opacity-50"
+                          >
+                            {allChecked ? 'Svuota' : 'Tutti'}
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-gray-400 mb-2 font-bold uppercase text-[10px]">
+              Permessi Scheda Azienda per Tab (Lettura · Modifica · Eliminazione)
+            </label>
+            <div className="overflow-x-auto bg-gray-950 border border-gray-800 rounded-none">
+              <table className="w-full border-collapse text-left text-xs">
+                <thead>
+                  <tr className="border-b border-gray-800 bg-gray-900/80 text-[10px] font-bold uppercase text-gray-400">
+                    <th className="px-3 py-2">Tab Scheda Azienda</th>
+                    {TAB_ACTIONS.map((act) => (
+                      <th key={act.key} className="px-3 py-2 text-center">
+                        {act.label}
+                      </th>
+                    ))}
+                    <th className="px-3 py-2 text-right">Riga</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-800/80">
+                  {AZIENDA_TAB_ITEMS.map((tab) => {
+                    const flags = aziendaTabPermissions[tab.key] || {
+                      read: false,
+                      edit: false,
+                      delete: false,
+                    };
+                    const allChecked = flags.read && flags.edit && flags.delete;
+
+                    return (
+                      <tr key={tab.key}>
+                        <td className="px-3 py-2 font-semibold text-gray-200">{tab.label}</td>
+                        {TAB_ACTIONS.map((act) => (
+                          <td key={act.key} className="px-3 py-2 text-center">
+                            <label className="inline-flex items-center justify-center gap-1.5 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                disabled={!isSuperAdmin}
+                                checked={Boolean(flags[act.key])}
+                                onChange={(e) =>
+                                  handleToggleAziendaTabFlag(tab.key, act.key, e.target.checked)
+                                }
+                                aria-label={`${tab.label} ${act.label}`}
+                                className="rounded-none disabled:opacity-60"
+                              />
+                              <span className="text-[11px] text-gray-300">{act.label}</span>
+                            </label>
+                          </td>
+                        ))}
+                        <td className="px-3 py-2 text-right">
+                          <button
+                            type="button"
+                            disabled={!isSuperAdmin}
+                            onClick={() => handleToggleAziendaTabRow(tab.key, !allChecked)}
+                            className="px-2 py-1 bg-gray-800 hover:bg-gray-700 text-[10px] font-bold uppercase text-gray-200 rounded-none cursor-pointer disabled:opacity-50"
+                          >
+                            {allChecked ? 'Svuota' : 'Tutti'}
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-gray-400 mb-2 font-bold uppercase text-[10px]">
               Permessi Sezioni
             </label>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-gray-950 border border-gray-800 p-3 rounded-none text-xs">
@@ -503,9 +774,7 @@ function ProfilePageContent() {
                     type="checkbox"
                     disabled={!isSuperAdmin}
                     checked={permessi[key]}
-                    onChange={(e) =>
-                      setPermessi((prev) => ({ ...prev, [key]: e.target.checked }))
-                    }
+                    onChange={(e) => handleToggleSection(key, e.target.checked)}
                     className="rounded-none"
                   />
                   <span>{label}</span>
@@ -516,7 +785,7 @@ function ProfilePageContent() {
 
           <div>
             <label className="block text-gray-400 mb-2 font-bold uppercase text-[10px]">
-              Permessi Operativi (Eliminazione, Offerte, Export, Progetti, Documenti, File)
+              Permessi Operativi (Aziende, Offerte, Export, Progetti, Documenti, File)
             </label>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-gray-950 border border-gray-800 p-3 rounded-none text-xs">
               {granularPermissions.map((item) => (

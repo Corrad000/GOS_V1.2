@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useState, useEffect, useContext, useCallback } from 'react';
+import { Suspense, useState, useEffect, useContext, useCallback, useMemo } from 'react';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import { supabase } from '@/services/supabase/client';
 import AnagraficaForm from '../../components/AnagraficaForm';
@@ -38,6 +38,30 @@ import { DocumentsView } from '@/modules/project-management/DocumentsView';
 import { QuestionnaireBuilderView } from '@/modules/questionnaire-builder/QuestionnaireBuilderView';
 import { QuestionnaireComposerView } from '@/modules/questionnaire-builder/QuestionnaireComposerView';
 import { QuestionnairePreviewView } from '@/modules/questionnaire-builder/QuestionnairePreviewView';
+import {
+  resolveGosPermissions,
+  type AziendaTabKey,
+  type GosUserPermissions,
+} from '@/utils/gosPermissions';
+
+type CompanyMainTab =
+  | 'anagrafica'
+  | 'contatti'
+  | 'questionari'
+  | 'business'
+  | 'offer-builder'
+  | 'trattative'
+  | 'documenti';
+
+const COMPANY_TAB_ITEMS: Array<{ key: CompanyMainTab; permKey: AziendaTabKey; label: string }> = [
+  { key: 'anagrafica', permKey: 'azienda_anagrafica', label: 'Anagrafica' },
+  { key: 'contatti', permKey: 'azienda_contatti_referenti', label: 'Contatti & Referenti' },
+  { key: 'questionari', permKey: 'azienda_questionari_assessment', label: 'Questionari & Assessment' },
+  { key: 'business', permKey: 'azienda_business_plan_finanziario', label: 'Business Plan & Finanziario' },
+  { key: 'offer-builder', permKey: 'azienda_offer_builder', label: 'Offer Builder' },
+  { key: 'trattative', permKey: 'azienda_trattative', label: 'Trattative' },
+  { key: 'documenti', permKey: 'azienda_documenti_file', label: 'Documenti & File' },
+];
 
 const PROBABILITA_PER_FASE: Record<FaseTrattativa, number> = {
   lead: 0.2,
@@ -75,12 +99,13 @@ function CompanyPageContent() {
   const queryTab = searchParams?.get('tab');
   const queryTrattativaId = searchParams?.get('trattativa');
 
-  const [activeTab, setActiveTab] = useState<'anagrafica' | 'contatti' | 'questionari' | 'business' | 'offer-builder' | 'trattative' | 'documenti'>(
+  const [activeTab, setActiveTab] = useState<CompanyMainTab>(
     queryTab === 'trattative' ? 'trattative' : 'anagrafica'
   );
   const [questionariSubTab, setQuestionariSubTab] = useState<'assessment' | 'kyb'>('assessment');
   const [loadingCompany, setLoadingCompany] = useState(true);
   const [companyError, setCompanyError] = useState<string | null>(null);
+  const [userProfile, setUserProfile] = useState<any | null>(null);
 
   const [companyData, setCompanyData] = useState({
     id: '',
@@ -153,12 +178,79 @@ function CompanyPageContent() {
   const [isSubmittingTrattativa, setIsSubmittingTrattativa] = useState(false);
 
   useEffect(() => {
+    let active = true;
+
+    async function loadCurrentProfile() {
+      try {
+        const { data: authData } = await supabase.auth.getUser();
+        const authUser = authData?.user || null;
+        if (!authUser) return;
+
+        const { data: profiles } = await supabase.from('gos_profiles').select('*');
+        const list = Array.isArray(profiles) ? profiles : [];
+        const matched =
+          list.find((p: any) => String(p.id) === String(authUser.id)) ||
+          list.find(
+            (p: any) =>
+              authUser.email &&
+              (p.email || '').toLowerCase() === String(authUser.email).toLowerCase()
+          ) ||
+          null;
+
+        if (active) {
+          setUserProfile(matched);
+        }
+      } catch {
+        // ignora errori di lettura profilo
+      }
+    }
+
+    loadCurrentProfile();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const permissions: GosUserPermissions = useMemo(() => {
+    return resolveGosPermissions(userProfile || { ruolo: 'Equity Partner' });
+  }, [userProfile]);
+
+  const visibleCompanyTabs = useMemo(() => {
+    return COMPANY_TAB_ITEMS.filter((t) =>
+      Boolean(permissions.aziendaTabPermissions[t.permKey]?.read)
+    );
+  }, [permissions.aziendaTabPermissions]);
+
+  useEffect(() => {
     if (queryTab === 'trattative') {
       setActiveTab('trattative');
     }
   }, [queryTab]);
 
+  useEffect(() => {
+    if (visibleCompanyTabs.length === 0) return;
+    const isCurrentAllowed = visibleCompanyTabs.some((t) => t.key === activeTab);
+    if (!isCurrentAllowed) {
+      setActiveTab(visibleCompanyTabs[0].key);
+      setIsEditingAnagrafica(false);
+    }
+  }, [visibleCompanyTabs, activeTab]);
+
+  const canEditAnagrafica =
+    Boolean(permissions.aziendaTabPermissions.azienda_anagrafica?.edit) &&
+    permissions.canEditAziende;
+  const canEditBusiness = Boolean(
+    permissions.aziendaTabPermissions.azienda_business_plan_finanziario?.edit
+  );
+  const canEditOfferBuilder =
+    Boolean(permissions.aziendaTabPermissions.azienda_offer_builder?.edit) &&
+    permissions.canEditOfferte;
+  const canEditTrattative = Boolean(
+    permissions.aziendaTabPermissions.azienda_trattative?.edit
+  );
+
   const handleRemoveCompanyModule = (moduleId: string) => {
+    if (!canEditOfferBuilder) return;
     setSelectedCompanyModules(prev => prev.filter(m => m.id !== moduleId));
   };
 
@@ -416,6 +508,9 @@ function CompanyPageContent() {
     trattativaId: string,
     payload: ModificaTrattativaPayload
   ) => {
+    if (!canEditTrattative) {
+      throw new Error('Non hai i permessi di modifica sulle trattative.');
+    }
     const nowIso = new Date().toISOString();
     const chiusuraIso = payload.chiusuraPrevista
       ? new Date(payload.chiusuraPrevista).toISOString()
@@ -455,6 +550,7 @@ function CompanyPageContent() {
 
   const handleCreateBusinessPlan = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canEditBusiness) return;
     if (!bpTitle.trim()) return;
 
     setIsSubmittingBp(true);
@@ -496,6 +592,7 @@ function CompanyPageContent() {
 
   const handleCreateOffer = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canEditOfferBuilder) return;
     if (!offerTitle.trim()) return;
 
     setIsSubmittingOffer(true);
@@ -541,6 +638,7 @@ function CompanyPageContent() {
   };
 
   const handleSaveOfferModules = async (mods: any[]) => {
+    if (!canEditOfferBuilder) return;
     if (!activeOffer?.id) return;
     try {
       const { data, error } = await supabase
@@ -565,6 +663,7 @@ function CompanyPageContent() {
 
   const handleCreateTrattativa = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canEditTrattative) return;
     if (!trattativaTitolo.trim()) return;
 
     setIsSubmittingTrattativa(true);
@@ -747,6 +846,7 @@ function CompanyPageContent() {
     trattativaId: string,
     nuovoStato: StatoTrattativa
   ) => {
+    if (!canEditTrattative) return;
     const precedente = normalizzaStato(activeTrattativa?.stato_trattativa);
     const nowIso = new Date().toISOString();
 
@@ -773,6 +873,7 @@ function CompanyPageContent() {
     trattativaId: string,
     nuovaFase: FaseTrattativa
   ) => {
+    if (!canEditTrattative) return;
     const precedente = normalizzaFase(activeTrattativa?.fase);
     const nuovaProb = PROBABILITA_PER_FASE[nuovaFase] ?? 0.2;
     const nowIso = new Date().toISOString();
@@ -806,6 +907,7 @@ function CompanyPageContent() {
       prossimaAzione?: string;
     }
   ) => {
+    if (!canEditTrattative) return;
     const nowIso = new Date().toISOString();
     appendTimeline(trattativaId, {
       id: `ev-${Date.now()}`,
@@ -836,6 +938,7 @@ function CompanyPageContent() {
     trattativaId: string,
     payload: { titolo: string; data: string }
   ) => {
+    if (!canEditTrattative) return;
     const nowIso = new Date().toISOString();
     const parsedDate = new Date(payload.data);
     const isoTarget = Number.isNaN(parsedDate.getTime()) ? nowIso : parsedDate.toISOString();
@@ -870,6 +973,7 @@ function CompanyPageContent() {
   };
 
   const handleConfermaAzioneFattaTrattativa = async (trattativaId: string) => {
+    if (!canEditTrattative) return;
     const nowIso = new Date().toISOString();
     const azioneCompletata =
       activeTrattativa?.azione_programmata_titolo ||
@@ -904,6 +1008,11 @@ function CompanyPageContent() {
       })
       .eq('id', trattativaId);
   };
+
+  const currentTabItem = COMPANY_TAB_ITEMS.find((t) => t.key === activeTab);
+  const currentTabReadAllowed = currentTabItem
+    ? Boolean(permissions.aziendaTabPermissions[currentTabItem.permKey]?.read)
+    : false;
 
   return (
     <main className="min-h-screen bg-gray-950 text-gray-100 font-sans p-6 md:p-10 space-y-8">
@@ -944,383 +1053,308 @@ function CompanyPageContent() {
         )}
 
         <div className="flex flex-wrap gap-6 border-b border-gray-800 pb-4 text-sm font-semibold">
-          <button
-            onClick={() => { setActiveTab('anagrafica'); setIsEditingAnagrafica(false); }}
-            className={`pb-2 transition-all cursor-pointer ${activeTab === 'anagrafica' ? 'text-white border-b-2 border-[#FF5500]' : 'text-gray-400 hover:text-gray-200'}`}
-          >
-            Anagrafica
-          </button>
-          <button
-            onClick={() => setActiveTab('contatti')}
-            className={`pb-2 transition-all cursor-pointer ${activeTab === 'contatti' ? 'text-white border-b-2 border-[#FF5500]' : 'text-gray-400 hover:text-gray-200'}`}
-          >
-            Contatti &amp; Referenti
-          </button>
-          <button
-            onClick={() => { setActiveTab('questionari'); setActiveQuestionario(null); setShowQuestPreview(false); }}
-            className={`pb-2 transition-all cursor-pointer ${activeTab === 'questionari' ? 'text-white border-b-2 border-[#FF5500]' : 'text-gray-400 hover:text-gray-200'}`}
-          >
-            Questionari &amp; Assessment
-          </button>
-          <button
-            onClick={() => setActiveTab('business')}
-            className={`pb-2 transition-all cursor-pointer ${activeTab === 'business' ? 'text-white border-b-2 border-[#FF5500]' : 'text-gray-400 hover:text-gray-200'}`}
-          >
-            Business Plan &amp; Finanziario
-          </button>
-          <button
-            onClick={() => { setActiveTab('offer-builder'); setActiveOffer(null); setShowOfferPreview(false); }}
-            className={`pb-2 transition-all cursor-pointer ${activeTab === 'offer-builder' ? 'text-white border-b-2 border-[#FF5500]' : 'text-gray-400 hover:text-gray-200'}`}
-          >
-            Offer Builder
-          </button>
-          <button
-            onClick={() => { setActiveTab('trattative'); setActiveTrattativa(null); }}
-            className={`pb-2 transition-all cursor-pointer ${activeTab === 'trattative' ? 'text-white border-b-2 border-[#FF5500]' : 'text-gray-400 hover:text-gray-200'}`}
-          >
-            Trattative
-          </button>
-          <button
-            onClick={() => setActiveTab('documenti')}
-            className={`pb-2 transition-all cursor-pointer ${activeTab === 'documenti' ? 'text-white border-b-2 border-[#FF5500]' : 'text-gray-400 hover:text-gray-200'}`}
-          >
-            Documenti &amp; File
-          </button>
-        </div>
-
-        {activeTab === 'anagrafica' && (
-          <div className="space-y-6">
-            {!isEditingAnagrafica ? (
-              <AnagraficaView
-                company={companyData}
-                onEdit={() => setIsEditingAnagrafica(true)}
-              />
-            ) : (
-              <AnagraficaForm
-                initialData={companyData}
-                onSave={async (updatedData) => {
-                  try {
-                    const { error } = await supabase
-                      .from('gos_aziende')
-                      .update({
-                        ragione_sociale: updatedData.ragione_sociale,
-                        partita_iva: updatedData.partita_iva,
-                        codice_fiscale: updatedData.codice_fiscale,
-                        categoria: updatedData.categoria,
-                        indirizzo: updatedData.indirizzo,
-                        citta: updatedData.citta,
-                        nazione: updatedData.nazione,
-                        sito_web: updatedData.sito_web,
-                        referente: updatedData.referente,
-                        email: updatedData.email,
-                        telefono: updatedData.telefono,
-                        advisor_nome: updatedData.advisor_nome,
-                        fatturato: updatedData.fatturato,
-                        note: updatedData.note,
-                        stato: updatedData.stato
-                      })
-                      .eq('id', resolvedCompanyId);
-
-                    if (error) throw new Error(formatSupabaseError(error, 'Errore salvataggio anagrafica'));
-
-                    if (updatedData.referente) {
-                      const { nome, cognome } = splitNomeCognome(updatedData.referente);
-                      await upsertContatto({
-                        nome,
-                        cognome,
-                        email: updatedData.email || null,
-                        telefono: updatedData.telefono || null,
-                        ruolo: 'Referente Aziendale',
-                        aziendaId: resolvedCompanyId,
-                        aziendaNome: updatedData.ragione_sociale,
-                        origine: 'anagrafica',
-                      });
-                      const refreshed = await listAllContatti(resolvedCompanyId);
-                      setCompanyContacts(refreshed);
-                    }
-
-                    setCompanyData(prev => ({ ...prev, ...updatedData }));
-                    setIsEditingAnagrafica(false);
-                    alert('Dati aziendali aggiornati con successo!');
-                  } catch (err: unknown) {
-                    alert('Errore durante il salvataggio: ' + formatSupabaseError(err, 'Errore sconosciuto'));
-                  }
-                }}
-                onCancel={() => setIsEditingAnagrafica(false)}
-              />
-            )}
-
-            <div className="rounded-2xl border border-gray-800 bg-gray-900 p-6 space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-800 pb-3">
-                <div>
-                  <h3 className="text-sm font-extrabold uppercase tracking-wider text-white">
-                    Fatture Emesse ({companyInvoices.length})
-                  </h3>
-                  <p className="text-xs text-gray-400">
-                    Storico fatture intestate a {companyData.ragione_sociale}.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => router.push('/dashboard')}
-                  className="cursor-pointer rounded-xl border border-gray-700 bg-gray-950 px-3.5 py-2 text-xs font-bold text-gray-200 hover:border-[#FF5500]"
-                >
-                  Apri Invoice Generator
-                </button>
-              </div>
-
-              {companyInvoices.length === 0 ? (
-                <p className="text-xs text-gray-400">
-                  Nessuna fattura registrata per questa azienda.
-                </p>
-              ) : (
-                <div className="overflow-x-auto rounded-xl border border-gray-800 bg-gray-950">
-                  <table className="w-full border-collapse text-left text-xs">
-                    <thead>
-                      <tr className="border-b border-gray-800 bg-gray-900/70 text-[10px] uppercase text-gray-400">
-                        <th className="px-4 py-2.5">Numero</th>
-                        <th className="px-4 py-2.5">Data</th>
-                        <th className="px-4 py-2.5">Scadenza</th>
-                        <th className="px-4 py-2.5">Stato</th>
-                        <th className="px-4 py-2.5 text-right">Totale</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-800/80">
-                      {companyInvoices.map((inv) => (
-                        <tr key={inv.id || inv.invoice_number}>
-                          <td className="px-4 py-2.5 font-mono font-bold text-white">
-                            {inv.invoice_number}
-                          </td>
-                          <td className="px-4 py-2.5 font-mono text-gray-400">{inv.issue_date}</td>
-                          <td className="px-4 py-2.5 font-mono text-gray-400">{inv.due_date}</td>
-                          <td className="px-4 py-2.5 uppercase font-semibold text-emerald-300">
-                            {inv.status}
-                          </td>
-                          <td className="px-4 py-2.5 text-right font-mono font-bold text-white">
-                            {inv.currency} {Number(inv.gross_total || 0).toFixed(2)}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {activeTab === 'contatti' && (
-          <ContactsDirectoryView
-            aziendaId={resolvedCompanyId}
-            aziendaNome={companyData.ragione_sociale}
-          />
-        )}
-
-        {activeTab === 'questionari' && (
-          <div className="space-y-6">
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => setQuestionariSubTab('assessment')}
-                className={`cursor-pointer rounded-xl px-4 py-2 text-xs font-bold uppercase tracking-wider transition ${
-                  questionariSubTab === 'assessment'
-                    ? 'bg-[#FF5500] text-white shadow'
-                    : 'bg-gray-900 text-gray-400 border border-gray-800 hover:text-white'
-                }`}
-              >
-                Questionari &amp; Assessment
-              </button>
-              <button
-                type="button"
-                onClick={() => setQuestionariSubTab('kyb')}
-                className={`cursor-pointer rounded-xl px-4 py-2 text-xs font-bold uppercase tracking-wider transition ${
-                  questionariSubTab === 'kyb'
-                    ? 'bg-[#FF5500] text-white shadow'
-                    : 'bg-gray-900 text-gray-400 border border-gray-800 hover:text-white'
-                }`}
-              >
-                Pacchetto KYB (Societario &amp; UBO)
-              </button>
-            </div>
-
-            {questionariSubTab === 'kyb' ? (
-              <KybQuestionnaireView
-                companyCode={companyCode || resolvedCompanyId}
-                aziendaId={resolvedCompanyId}
-                companySeed={{
-                  ragione_sociale: companyData.ragione_sociale,
-                  partita_iva: companyData.partita_iva,
-                  codice_fiscale: companyData.codice_fiscale,
-                  indirizzo: companyData.indirizzo,
-                  citta: companyData.citta,
-                  nazione: companyData.nazione,
-                  sito_web: companyData.sito_web,
-                  referente: companyData.referente,
-                  email: companyData.email,
-                  telefono: companyData.telefono,
-                  advisor_nome: companyData.advisor_nome,
-                }}
-              />
-            ) : !activeQuestionario ? (
-              <QuestionnaireBuilderView
-                companyCode={companyCode}
-                companyName={companyData.ragione_sociale}
-                onOpenComposer={(q) => {
-                  setActiveQuestionario(q);
-                  setShowQuestPreview(false);
-                }}
-                onOpenPreview={(q) => {
-                  setActiveQuestionario(q);
-                  setShowQuestPreview(true);
-                }}
-              />
-            ) : !showQuestPreview ? (
-              <QuestionnaireComposerView
-                companyCode={companyCode}
-                companyName={companyData.ragione_sociale}
-                questionario={activeQuestionario}
-                onBack={() => setActiveQuestionario(null)}
-                onOpenPreview={() => setShowQuestPreview(true)}
-              />
-            ) : (
-              <QuestionnairePreviewView
-                companyCode={companyCode}
-                companyName={companyData.ragione_sociale}
-                companyEmail={companyData.email}
-                questionario={activeQuestionario}
-                onBackToComposer={() => setShowQuestPreview(false)}
-                onBackToList={() => {
+          {visibleCompanyTabs.map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => {
+                setActiveTab(t.key);
+                if (t.key === 'anagrafica') setIsEditingAnagrafica(false);
+                if (t.key === 'questionari') {
                   setActiveQuestionario(null);
                   setShowQuestPreview(false);
-                }}
+                }
+                if (t.key === 'offer-builder') {
+                  setActiveOffer(null);
+                  setShowOfferPreview(false);
+                }
+                if (t.key === 'trattative') setActiveTrattativa(null);
+              }}
+              className={`pb-2 transition-all cursor-pointer ${
+                activeTab === t.key
+                  ? 'text-white border-b-2 border-[#FF5500]'
+                  : 'text-gray-400 hover:text-gray-200'
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        {!currentTabReadAllowed ? (
+          <div className="rounded-2xl border border-gray-800 bg-gray-900 p-8 text-center text-sm text-gray-400">
+            Non hai i permessi di lettura per questo tab della scheda azienda.
+          </div>
+        ) : (
+          <>
+            {activeTab === 'anagrafica' && (
+              <div className="space-y-6">
+                {!isEditingAnagrafica || !canEditAnagrafica ? (
+                  <AnagraficaView
+                    company={companyData}
+                    onEdit={canEditAnagrafica ? () => setIsEditingAnagrafica(true) : undefined}
+                  />
+                ) : (
+                  <AnagraficaForm
+                    initialData={companyData}
+                    onSave={async (updatedData) => {
+                      if (!canEditAnagrafica) return;
+                      try {
+                        const { error } = await supabase
+                          .from('gos_aziende')
+                          .update({
+                            ragione_sociale: updatedData.ragione_sociale,
+                            partita_iva: updatedData.partita_iva,
+                            codice_fiscale: updatedData.codice_fiscale,
+                            categoria: updatedData.categoria,
+                            indirizzo: updatedData.indirizzo,
+                            citta: updatedData.citta,
+                            nazione: updatedData.nazione,
+                            sito_web: updatedData.sito_web,
+                            referente: updatedData.referente,
+                            email: updatedData.email,
+                            telefono: updatedData.telefono,
+                            advisor_nome: updatedData.advisor_nome,
+                            fatturato: updatedData.fatturato,
+                            note: updatedData.note,
+                            stato: updatedData.stato
+                          })
+                          .eq('id', resolvedCompanyId);
+
+                        if (error) throw new Error(formatSupabaseError(error, 'Errore salvataggio anagrafica'));
+
+                        if (updatedData.referente) {
+                          const { nome, cognome } = splitNomeCognome(updatedData.referente);
+                          await upsertContatto({
+                            nome,
+                            cognome,
+                            email: updatedData.email || null,
+                            telefono: updatedData.telefono || null,
+                            ruolo: 'Referente Aziendale',
+                            aziendaId: resolvedCompanyId,
+                            aziendaNome: updatedData.ragione_sociale,
+                            origine: 'anagrafica',
+                          });
+                          const refreshed = await listAllContatti(resolvedCompanyId);
+                          setCompanyContacts(refreshed);
+                        }
+
+                        setCompanyData(prev => ({ ...prev, ...updatedData }));
+                        setIsEditingAnagrafica(false);
+                        alert('Dati aziendali aggiornati con successo!');
+                      } catch (err: unknown) {
+                        alert('Errore durante il salvataggio: ' + formatSupabaseError(err, 'Errore sconosciuto'));
+                      }
+                    }}
+                    onCancel={() => setIsEditingAnagrafica(false)}
+                  />
+                )}
+
+                <div className="rounded-2xl border border-gray-800 bg-gray-900 p-6 space-y-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-800 pb-3">
+                    <div>
+                      <h3 className="text-sm font-extrabold uppercase tracking-wider text-white">
+                        Fatture Emesse ({companyInvoices.length})
+                      </h3>
+                      <p className="text-xs text-gray-400">
+                        Storico fatture intestate a {companyData.ragione_sociale}.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => router.push('/dashboard')}
+                      className="cursor-pointer rounded-xl border border-gray-700 bg-gray-950 px-3.5 py-2 text-xs font-bold text-gray-200 hover:border-[#FF5500]"
+                    >
+                      Apri Invoice Generator
+                    </button>
+                  </div>
+
+                  {companyInvoices.length === 0 ? (
+                    <p className="text-xs text-gray-400">
+                      Nessuna fattura registrata per questa azienda.
+                    </p>
+                  ) : (
+                    <div className="overflow-x-auto rounded-xl border border-gray-800 bg-gray-950">
+                      <table className="w-full border-collapse text-left text-xs">
+                        <thead>
+                          <tr className="border-b border-gray-800 bg-gray-900/70 text-[10px] uppercase text-gray-400">
+                            <th className="px-4 py-2.5">Numero</th>
+                            <th className="px-4 py-2.5">Data</th>
+                            <th className="px-4 py-2.5">Scadenza</th>
+                            <th className="px-4 py-2.5">Stato</th>
+                            <th className="px-4 py-2.5 text-right">Totale</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-800/80">
+                          {companyInvoices.map((inv) => (
+                            <tr key={inv.id || inv.invoice_number}>
+                              <td className="px-4 py-2.5 font-mono font-bold text-white">
+                                {inv.invoice_number}
+                              </td>
+                              <td className="px-4 py-2.5 font-mono text-gray-400">{inv.issue_date}</td>
+                              <td className="px-4 py-2.5 font-mono text-gray-400">{inv.due_date}</td>
+                              <td className="px-4 py-2.5 uppercase font-semibold text-emerald-300">
+                                {inv.status}
+                              </td>
+                              <td className="px-4 py-2.5 text-right font-mono font-bold text-white">
+                                {inv.currency} {Number(inv.gross_total || 0).toFixed(2)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'contatti' && (
+              <ContactsDirectoryView
+                aziendaId={resolvedCompanyId}
+                aziendaNome={companyData.ragione_sociale}
               />
             )}
-          </div>
-        )}
 
-        {activeTab === 'business' && (
-          <div className="bg-gray-900 border border-gray-800 p-6 rounded-2xl space-y-6">
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-gray-800 pb-4">
-              <div>
-                <h3 className="text-base font-bold text-white uppercase">Progetti &amp; Business Plan</h3>
-                <p className="text-xs text-gray-400 mt-0.5">Elenco dei piani e progetti strategici sviluppati per {companyData.ragione_sociale}.</p>
-              </div>
-              <button
-                onClick={() => setShowCreateBpModal(true)}
-                className="px-4 py-2.5 bg-[#FF5500] hover:bg-orange-600 text-white text-xs font-bold rounded-xl shadow transition-all cursor-pointer uppercase tracking-wider"
-              >
-                + Crea Nuovo Progetto
-              </button>
-            </div>
-
-            {loadingBp ? (
-              <div className="p-8 text-center text-xs font-mono text-gray-400">Caricamento progetti in corso...</div>
-            ) : businessPlans.length === 0 ? (
-              <div className="p-12 text-center border border-dashed border-gray-800 bg-gray-950 rounded-xl space-y-3">
-                <p className="text-sm text-gray-400">Nessun progetto registrato per questa azienda.</p>
-                <button
-                  onClick={() => setShowCreateBpModal(true)}
-                  className="px-4 py-2.5 bg-[#FF5500] hover:bg-orange-600 text-white text-xs font-bold rounded-xl shadow transition-all cursor-pointer"
-                >
-                  Crea il primo Progetto
-                </button>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {businessPlans.map((proj) => (
-                  <div key={proj.id} className="bg-gray-950 border border-gray-800 p-5 rounded-xl space-y-4 flex flex-col justify-between">
-                    <div className="space-y-2">
-                      <div className="flex justify-between items-start">
-                        <span className="px-2.5 py-1 bg-gray-900 text-[#FF5500] border border-gray-800 font-mono text-xs font-bold rounded-lg uppercase">
-                          {proj.codice_progetto || 'PROJ'}
-                        </span>
-                        <span className="px-2 py-0.5 bg-emerald-950 border border-emerald-800 text-emerald-300 text-[10px] font-semibold rounded uppercase">
-                          {proj.stato || 'Bozza'}
-                        </span>
-                      </div>
-                      <h4 className="text-sm font-bold text-white uppercase">{proj.titolo}</h4>
-                      <p className="text-xs text-gray-400 line-clamp-2">{proj.descrizione || 'Nessuna descrizione inserita.'}</p>
-                    </div>
-
-                    <div className="pt-3 border-t border-gray-900 flex justify-between items-center">
-                      <span className="text-[10px] font-mono text-gray-500">
-                        Creato il: {new Date(proj.created_at || Date.now()).toLocaleDateString()}
-                      </span>
-                      <button
-                        onClick={() => router.push(`/progetti/${proj.id}`)}
-                        className="px-4 py-2 bg-gray-900 hover:bg-gray-800 text-white font-bold rounded-xl border border-gray-800 transition-all text-xs cursor-pointer"
-                      >
-                        Apri Area Progetto -&gt;
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {activeTab === 'offer-builder' && (
-          <div className="space-y-6">
-            {!activeOffer ? (
-              <div className="bg-gray-950 border border-gray-800 p-6 rounded-2xl space-y-6">
-                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-gray-800 pb-4">
-                  <div>
-                    <h3 className="text-base font-bold text-white uppercase">Offerte Commerciali</h3>
-                    <p className="text-xs text-gray-400 mt-0.5">Elenco delle proposte commerciali e listini configurati per {companyData.ragione_sociale}.</p>
-                  </div>
+            {activeTab === 'questionari' && (
+              <div className="space-y-6">
+                <div className="flex flex-wrap gap-2">
                   <button
-                    onClick={() => setShowCreateOfferModal(true)}
-                    className="px-4 py-2.5 bg-[#FF5500] hover:bg-orange-600 text-white text-xs font-bold rounded-xl shadow transition-all cursor-pointer uppercase tracking-wider"
+                    type="button"
+                    onClick={() => setQuestionariSubTab('assessment')}
+                    className={`cursor-pointer rounded-xl px-4 py-2 text-xs font-bold uppercase tracking-wider transition ${
+                      questionariSubTab === 'assessment'
+                        ? 'bg-[#FF5500] text-white shadow'
+                        : 'bg-gray-900 text-gray-400 border border-gray-800 hover:text-white'
+                    }`}
                   >
-                    + Crea Nuova Offerta
+                    Questionari &amp; Assessment
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setQuestionariSubTab('kyb')}
+                    className={`cursor-pointer rounded-xl px-4 py-2 text-xs font-bold uppercase tracking-wider transition ${
+                      questionariSubTab === 'kyb'
+                        ? 'bg-[#FF5500] text-white shadow'
+                        : 'bg-gray-900 text-gray-400 border border-gray-800 hover:text-white'
+                    }`}
+                  >
+                    Pacchetto KYB (Societario &amp; UBO)
                   </button>
                 </div>
 
-                {loadingOffers ? (
-                  <div className="p-8 text-center text-xs font-mono text-gray-400">Caricamento offerte in corso...</div>
-                ) : offersList.length === 0 ? (
-                  <div className="p-12 text-center border border-dashed border-gray-800 bg-gray-900 rounded-xl space-y-3">
-                    <p className="text-sm text-gray-400">Nessuna offerta commerciale registrata per questa azienda.</p>
+                {questionariSubTab === 'kyb' ? (
+                  <KybQuestionnaireView
+                    companyCode={companyCode || resolvedCompanyId}
+                    aziendaId={resolvedCompanyId}
+                    companySeed={{
+                      ragione_sociale: companyData.ragione_sociale,
+                      partita_iva: companyData.partita_iva,
+                      codice_fiscale: companyData.codice_fiscale,
+                      indirizzo: companyData.indirizzo,
+                      citta: companyData.citta,
+                      nazione: companyData.nazione,
+                      sito_web: companyData.sito_web,
+                      referente: companyData.referente,
+                      email: companyData.email,
+                      telefono: companyData.telefono,
+                      advisor_nome: companyData.advisor_nome,
+                    }}
+                  />
+                ) : !activeQuestionario ? (
+                  <QuestionnaireBuilderView
+                    companyCode={companyCode}
+                    companyName={companyData.ragione_sociale}
+                    onOpenComposer={(q) => {
+                      setActiveQuestionario(q);
+                      setShowQuestPreview(false);
+                    }}
+                    onOpenPreview={(q) => {
+                      setActiveQuestionario(q);
+                      setShowQuestPreview(true);
+                    }}
+                  />
+                ) : !showQuestPreview ? (
+                  <QuestionnaireComposerView
+                    companyCode={companyCode}
+                    companyName={companyData.ragione_sociale}
+                    questionario={activeQuestionario}
+                    onBack={() => setActiveQuestionario(null)}
+                    onOpenPreview={() => setShowQuestPreview(true)}
+                  />
+                ) : (
+                  <QuestionnairePreviewView
+                    companyCode={companyCode}
+                    companyName={companyData.ragione_sociale}
+                    companyEmail={companyData.email}
+                    questionario={activeQuestionario}
+                    onBackToComposer={() => setShowQuestPreview(false)}
+                    onBackToList={() => {
+                      setActiveQuestionario(null);
+                      setShowQuestPreview(false);
+                    }}
+                  />
+                )}
+              </div>
+            )}
+
+            {activeTab === 'business' && (
+              <div className="bg-gray-900 border border-gray-800 p-6 rounded-2xl space-y-6">
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-gray-800 pb-4">
+                  <div>
+                    <h3 className="text-base font-bold text-white uppercase">Progetti &amp; Business Plan</h3>
+                    <p className="text-xs text-gray-400 mt-0.5">Elenco dei piani e progetti strategici sviluppati per {companyData.ragione_sociale}.</p>
+                  </div>
+                  {canEditBusiness && (
                     <button
-                      onClick={() => setShowCreateOfferModal(true)}
-                      className="px-4 py-2.5 bg-[#FF5500] hover:bg-orange-600 text-white text-xs font-bold rounded-xl shadow transition-all cursor-pointer"
+                      onClick={() => setShowCreateBpModal(true)}
+                      className="px-4 py-2.5 bg-[#FF5500] hover:bg-orange-600 text-white text-xs font-bold rounded-xl shadow transition-all cursor-pointer uppercase tracking-wider"
                     >
-                      Crea la prima Offerta
+                      + Crea Nuovo Progetto
                     </button>
+                  )}
+                </div>
+
+                {loadingBp ? (
+                  <div className="p-8 text-center text-xs font-mono text-gray-400">Caricamento progetti in corso...</div>
+                ) : businessPlans.length === 0 ? (
+                  <div className="p-12 text-center border border-dashed border-gray-800 bg-gray-950 rounded-xl space-y-3">
+                    <p className="text-sm text-gray-400">Nessun progetto registrato per questa azienda.</p>
+                    {canEditBusiness && (
+                      <button
+                        onClick={() => setShowCreateBpModal(true)}
+                        className="px-4 py-2.5 bg-[#FF5500] hover:bg-orange-600 text-white text-xs font-bold rounded-xl shadow transition-all cursor-pointer"
+                      >
+                        Crea il primo Progetto
+                      </button>
+                    )}
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {offersList.map((off) => (
-                      <div
-                        key={off.id}
-                        className="bg-slate-800/90 hover:bg-slate-800 border border-slate-600/80 hover:border-slate-500 p-5 rounded-xl space-y-4 flex flex-col justify-between shadow-md transition-all"
-                      >
+                    {businessPlans.map((proj) => (
+                      <div key={proj.id} className="bg-gray-950 border border-gray-800 p-5 rounded-xl space-y-4 flex flex-col justify-between">
                         <div className="space-y-2">
                           <div className="flex justify-between items-start">
-                            <span className="px-2.5 py-1 bg-gray-950 text-[#FF5500] border border-slate-700 font-mono text-xs font-bold rounded-lg uppercase">
-                              {off.codice_offerta || 'OFF'}
+                            <span className="px-2.5 py-1 bg-gray-900 text-[#FF5500] border border-gray-800 font-mono text-xs font-bold rounded-lg uppercase">
+                              {proj.codice_progetto || 'PROJ'}
                             </span>
-                            <span className="px-2 py-0.5 bg-emerald-950 border border-emerald-700 text-emerald-300 text-[10px] font-semibold rounded uppercase">
-                              {off.stato || 'Bozza'}
+                            <span className="px-2 py-0.5 bg-emerald-950 border border-emerald-800 text-emerald-300 text-[10px] font-semibold rounded uppercase">
+                              {proj.stato || 'Bozza'}
                             </span>
                           </div>
-                          <h4 className="text-sm font-bold text-white uppercase">{off.titolo}</h4>
-                          <p className="text-xs text-slate-300 line-clamp-2">{off.descrizione || 'Nessuna descrizione inserita.'}</p>
+                          <h4 className="text-sm font-bold text-white uppercase">{proj.titolo}</h4>
+                          <p className="text-xs text-gray-400 line-clamp-2">{proj.descrizione || 'Nessuna descrizione inserita.'}</p>
                         </div>
 
-                        <div className="pt-3 border-t border-slate-700/80 flex justify-between items-center">
-                          <span className="text-[10px] font-mono text-slate-400">
-                            Creato il: {new Date(off.created_at || Date.now()).toLocaleDateString()}
+                        <div className="pt-3 border-t border-gray-900 flex justify-between items-center">
+                          <span className="text-[10px] font-mono text-gray-500">
+                            Creato il: {new Date(proj.created_at || Date.now()).toLocaleDateString()}
                           </span>
                           <button
-                            onClick={() => {
-                              setActiveOffer(off);
-                              setSelectedCompanyModules(Array.isArray(off.moduli) ? off.moduli : []);
-                            }}
-                            className="px-4 py-2 bg-gray-950 hover:bg-gray-900 text-white font-bold rounded-xl border border-slate-600 transition-all text-xs cursor-pointer"
+                            onClick={() => router.push(`/progetti/${proj.id}`)}
+                            className="px-4 py-2 bg-gray-900 hover:bg-gray-800 text-white font-bold rounded-xl border border-gray-800 transition-all text-xs cursor-pointer"
                           >
-                            Apri Composizione -&gt;
+                            Apri Area Progetto -&gt;
                           </button>
                         </div>
                       </div>
@@ -1328,226 +1362,309 @@ function CompanyPageContent() {
                   </div>
                 )}
               </div>
-            ) : (
-              <div className="space-y-6">
-                <div className="flex justify-between items-center bg-gray-900 border border-gray-800 p-4 rounded-xl">
-                  <div className="flex items-center gap-3">
-                    <span className="px-3 py-1 bg-gray-950 border border-gray-800 text-[#FF5500] font-mono text-xs font-bold rounded-lg uppercase">
-                      {activeOffer.codice_offerta}
-                    </span>
-                    <h3 className="text-sm font-extrabold text-white uppercase">{activeOffer.titolo}</h3>
-                  </div>
-                  <button
-                    onClick={() => setActiveOffer(null)}
-                    className="px-4 py-2 bg-gray-950 hover:bg-gray-800 text-gray-300 border border-gray-800 text-xs font-semibold rounded-xl transition-all cursor-pointer"
-                  >
-                    &lt;- Torna alla Lista Offerte
-                  </button>
-                </div>
+            )}
 
-                {!showOfferPreview ? (
-                  <div className="space-y-6">
-                    {selectedCompanyModules.length > 0 && (
-                      <div className="flex justify-end">
+            {activeTab === 'offer-builder' && (
+              <div className="space-y-6">
+                {!activeOffer ? (
+                  <div className="bg-gray-950 border border-gray-800 p-6 rounded-2xl space-y-6">
+                    <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-gray-800 pb-4">
+                      <div>
+                        <h3 className="text-base font-bold text-white uppercase">Offerte Commerciali</h3>
+                        <p className="text-xs text-gray-400 mt-0.5">Elenco delle proposte commerciali e listini configurati per {companyData.ragione_sociale}.</p>
+                      </div>
+                      {canEditOfferBuilder && (
                         <button
-                          type="button"
-                          onClick={() => setShowOfferPreview(true)}
-                          className="px-5 py-2.5 bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold rounded-xl shadow transition-all cursor-pointer uppercase tracking-wider flex items-center gap-2"
+                          onClick={() => setShowCreateOfferModal(true)}
+                          className="px-4 py-2.5 bg-[#FF5500] hover:bg-orange-600 text-white text-xs font-bold rounded-xl shadow transition-all cursor-pointer uppercase tracking-wider"
                         >
-                          Visualizza Anteprima Proposta in Chiaro
+                          + Crea Nuova Offerta
                         </button>
+                      )}
+                    </div>
+
+                    {loadingOffers ? (
+                      <div className="p-8 text-center text-xs font-mono text-gray-400">Caricamento offerte in corso...</div>
+                    ) : offersList.length === 0 ? (
+                      <div className="p-12 text-center border border-dashed border-gray-800 bg-gray-900 rounded-xl space-y-3">
+                        <p className="text-sm text-gray-400">Nessuna offerta commerciale registrata per questa azienda.</p>
+                        {canEditOfferBuilder && (
+                          <button
+                            onClick={() => setShowCreateOfferModal(true)}
+                            className="px-4 py-2.5 bg-[#FF5500] hover:bg-orange-600 text-white text-xs font-bold rounded-xl shadow transition-all cursor-pointer"
+                          >
+                            Crea la prima Offerta
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {offersList.map((off) => (
+                          <div
+                            key={off.id}
+                            className="bg-slate-800/90 hover:bg-slate-800 border border-slate-600/80 hover:border-slate-500 p-5 rounded-xl space-y-4 flex flex-col justify-between shadow-md transition-all"
+                          >
+                            <div className="space-y-2">
+                              <div className="flex justify-between items-start">
+                                <span className="px-2.5 py-1 bg-gray-950 text-[#FF5500] border border-slate-700 font-mono text-xs font-bold rounded-lg uppercase">
+                                  {off.codice_offerta || 'OFF'}
+                                </span>
+                                <span className="px-2 py-0.5 bg-emerald-950 border border-emerald-700 text-emerald-300 text-[10px] font-semibold rounded uppercase">
+                                  {off.stato || 'Bozza'}
+                                </span>
+                              </div>
+                              <h4 className="text-sm font-bold text-white uppercase">{off.titolo}</h4>
+                              <p className="text-xs text-slate-300 line-clamp-2">{off.descrizione || 'Nessuna descrizione inserita.'}</p>
+                            </div>
+
+                            <div className="pt-3 border-t border-slate-700/80 flex justify-between items-center">
+                              <span className="text-[10px] font-mono text-slate-400">
+                                Creato il: {new Date(off.created_at || Date.now()).toLocaleDateString()}
+                              </span>
+                              <button
+                                onClick={() => {
+                                  setActiveOffer(off);
+                                  setSelectedCompanyModules(Array.isArray(off.moduli) ? off.moduli : []);
+                                }}
+                                className="px-4 py-2 bg-gray-950 hover:bg-gray-900 text-white font-bold rounded-xl border border-slate-600 transition-all text-xs cursor-pointer"
+                              >
+                                Apri Composizione -&gt;
+                              </button>
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     )}
+                  </div>
+                ) : (
+                  <div className="space-y-6">
+                    <div className="flex justify-between items-center bg-gray-900 border border-gray-800 p-4 rounded-xl">
+                      <div className="flex items-center gap-3">
+                        <span className="px-3 py-1 bg-gray-950 border border-gray-800 text-[#FF5500] font-mono text-xs font-bold rounded-lg uppercase">
+                          {activeOffer.codice_offerta}
+                        </span>
+                        <h3 className="text-sm font-extrabold text-white uppercase">{activeOffer.titolo}</h3>
+                      </div>
+                      <button
+                        onClick={() => setActiveOffer(null)}
+                        className="px-4 py-2 bg-gray-950 hover:bg-gray-800 text-gray-300 border border-gray-800 text-xs font-semibold rounded-xl transition-all cursor-pointer"
+                      >
+                        &lt;- Torna alla Lista Offerte
+                      </button>
+                    </div>
 
-                    <OfferBuilderView
-                      companyId={resolvedCompanyId}
-                      companyCode={companyCode}
-                      offerId={activeOffer.id}
-                      selectedCompanyModules={selectedCompanyModules}
-                      onRemoveModule={handleRemoveCompanyModule}
-                      onOpenModulePicker={(category: any) => {
-                        setSelectedCategoryForPicker(category);
-                        setIsModulePickerOpen(true);
+                    {!showOfferPreview ? (
+                      <div className="space-y-6">
+                        {selectedCompanyModules.length > 0 && (
+                          <div className="flex justify-end">
+                            <button
+                              type="button"
+                              onClick={() => setShowOfferPreview(true)}
+                              className="px-5 py-2.5 bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold rounded-xl shadow transition-all cursor-pointer uppercase tracking-wider flex items-center gap-2"
+                            >
+                              Visualizza Anteprima Proposta in Chiaro
+                            </button>
+                          </div>
+                        )}
+
+                        <OfferBuilderView
+                          companyId={resolvedCompanyId}
+                          companyCode={companyCode}
+                          offerId={activeOffer.id}
+                          selectedCompanyModules={selectedCompanyModules}
+                          onRemoveModule={handleRemoveCompanyModule}
+                          onOpenModulePicker={(category: any) => {
+                            if (!canEditOfferBuilder) return;
+                            setSelectedCategoryForPicker(category);
+                            setIsModulePickerOpen(true);
+                          }}
+                          onSaveOfferModules={handleSaveOfferModules}
+                        />
+                      </div>
+                    ) : (
+                      <OfferPreviewView
+                        companyData={companyData}
+                        selectedModules={selectedCompanyModules}
+                        onBackToBuilder={() => setShowOfferPreview(false)}
+                      />
+                    )}
+
+                    <ModulePickerModal
+                      selectedCategory={selectedCategoryForPicker}
+                      isOpen={isModulePickerOpen}
+                      onClose={() => setIsModulePickerOpen(false)}
+                      onSelectModule={(module: any) => {
+                        if (!canEditOfferBuilder) return;
+                        if (selectedCompanyModules.some(m => m.id === module.id)) {
+                          alert('Questo modulo è già stato aggiunto all\'offerta.');
+                          return;
+                        }
+                        setSelectedCompanyModules(prev => [...prev, module]);
+                        alert(`Modulo "${module.title || module.titolo}" aggiunto con successo!`);
+                        setIsModulePickerOpen(false);
                       }}
-                      onSaveOfferModules={handleSaveOfferModules}
                     />
                   </div>
+                )}
+              </div>
+            )}
+
+            {activeTab === 'trattative' && (
+              <div className="space-y-6">
+                {!activeTrattativa ? (
+                  <div className="bg-gray-900 border border-gray-800 p-6 rounded-2xl space-y-6">
+                    <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-gray-800 pb-4">
+                      <div>
+                        <h3 className="text-base font-bold text-white uppercase">Trattative Commerciali</h3>
+                        <p className="text-xs text-gray-400 mt-0.5">
+                          Elenco delle trattative aperte e chiuse per {companyData.ragione_sociale}.
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {(['tutte', 'aperte', 'chiuse'] as const).map((f) => (
+                          <button
+                            key={f}
+                            type="button"
+                            onClick={() => setTrattativeFiltro(f)}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-semibold capitalize transition-all cursor-pointer ${
+                              trattativeFiltro === f
+                                ? 'bg-gray-800 text-white border border-gray-600'
+                                : 'bg-gray-950 text-gray-400 border border-gray-800 hover:text-gray-200'
+                            }`}
+                          >
+                            {f === 'chiuse' ? 'Fatte / Chiuse' : f}
+                          </button>
+                        ))}
+                        {canEditTrattative && (
+                          <button
+                            type="button"
+                            onClick={() => setShowCreateTrattativaModal(true)}
+                            className="px-4 py-2.5 bg-[#FF5500] hover:bg-orange-600 text-white text-xs font-bold rounded-xl shadow transition-all cursor-pointer uppercase tracking-wider"
+                          >
+                            + Nuova Trattativa
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {loadingTrattative ? (
+                      <div className="p-8 text-center text-xs font-mono text-gray-400">Caricamento trattative in corso...</div>
+                    ) : filteredTrattative.length === 0 ? (
+                      <div className="p-12 text-center border border-dashed border-gray-800 bg-gray-950 rounded-xl space-y-3">
+                        <p className="text-sm text-gray-400">Nessuna trattativa registrata per questo filtro.</p>
+                        {canEditTrattative && (
+                          <button
+                            type="button"
+                            onClick={() => setShowCreateTrattativaModal(true)}
+                            className="px-4 py-2.5 bg-[#FF5500] hover:bg-orange-600 text-white text-xs font-bold rounded-xl shadow transition-all cursor-pointer"
+                          >
+                            Crea la prima Trattativa
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto rounded-xl border border-gray-800 bg-gray-950">
+                        <table className="w-full text-left border-collapse text-xs">
+                          <thead>
+                            <tr className="border-b border-gray-800 bg-gray-900/70 text-[10px] uppercase tracking-wider text-gray-400">
+                              <th className="px-4 py-3">Codice</th>
+                              <th className="px-4 py-3">Trattativa</th>
+                              <th className="px-4 py-3">Offerta</th>
+                              <th className="px-4 py-3">Fase</th>
+                              <th className="px-4 py-3">Stato</th>
+                              <th className="px-4 py-3 text-right">Valore</th>
+                              <th className="px-4 py-3 text-right">Prob.</th>
+                              <th className="px-4 py-3">Prossima azione</th>
+                              <th className="px-4 py-3 text-right">Azioni</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-800/80">
+                            {filteredTrattative.map((t) => (
+                              <tr
+                                key={t.id}
+                                onClick={() => setActiveTrattativa(t)}
+                                className="hover:bg-gray-900/70 transition cursor-pointer"
+                              >
+                                <td className="px-4 py-3 font-mono font-bold text-[#FF5500] whitespace-nowrap">
+                                  {t.codice_trattativa || 'TRT'}
+                                </td>
+                                <td className="px-4 py-3 font-semibold text-white">{t.titolo}</td>
+                                <td className="px-4 py-3 font-mono text-gray-300 whitespace-nowrap">
+                                  {t.codice_offerta || '-'}
+                                </td>
+                                <td className="px-4 py-3 text-gray-300 capitalize">{normalizzaFase(t.fase)}</td>
+                                <td className="px-4 py-3">
+                                  <span className="px-2 py-0.5 bg-emerald-950 border border-emerald-800 text-emerald-300 text-[10px] font-semibold rounded uppercase">
+                                    {normalizzaStato(t.stato_trattativa)}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-3 text-right font-mono text-white whitespace-nowrap">
+                                  € {Number(t.valore || 0).toLocaleString('it-IT')}
+                                </td>
+                                <td className="px-4 py-3 text-right font-mono text-gray-400 whitespace-nowrap">
+                                  {Math.round(Number(t.probabilita ?? 0.2) * 100)}%
+                                </td>
+                                <td className="px-4 py-3 text-gray-400">{t.azione_necessaria || '-'}</td>
+                                <td className="px-4 py-3 text-right whitespace-nowrap">
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setActiveTrattativa(t);
+                                    }}
+                                    className="px-3 py-1.5 bg-gray-900 hover:bg-gray-800 text-white font-bold rounded-lg border border-gray-700 text-[11px] cursor-pointer"
+                                  >
+                                    Apri -&gt;
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
                 ) : (
-                  <OfferPreviewView
-                    companyData={companyData}
-                    selectedModules={selectedCompanyModules}
-                    onBackToBuilder={() => setShowOfferPreview(false)}
+                  <SchedaTrattativa
+                    dati={buildDatiScheda(activeTrattativa)}
+                    onTornaAzienda={() => setActiveTrattativa(null)}
+                    onRegistraAttivita={(payload) =>
+                      handleRegistraAttivitaTrattativa(activeTrattativa.id, payload)
+                    }
+                    onProgrammaFollowUp={(payload) =>
+                      handleProgrammaFollowUpTrattativa(activeTrattativa.id, payload)
+                    }
+                    onConfermaAzioneFatta={() =>
+                      handleConfermaAzioneFattaTrattativa(activeTrattativa.id)
+                    }
+                    onNuovaOfferta={() => {
+                      if (!canEditOfferBuilder) return;
+                      setActiveTab('offer-builder');
+                      setShowCreateOfferModal(true);
+                    }}
+                    onCambiaStato={(nuovoStato) =>
+                      handleChangeTrattativaStato(activeTrattativa.id, nuovoStato)
+                    }
+                    onCambiaFase={(nuovaFase) =>
+                      handleChangeTrattativaFase(activeTrattativa.id, nuovaFase)
+                    }
+                    onModificaTrattativa={(payload) =>
+                      handleModificaTrattativa(activeTrattativa.id, payload)
+                    }
                   />
                 )}
-
-                <ModulePickerModal
-                  selectedCategory={selectedCategoryForPicker}
-                  isOpen={isModulePickerOpen}
-                  onClose={() => setIsModulePickerOpen(false)}
-                  onSelectModule={(module: any) => {
-                    if (selectedCompanyModules.some(m => m.id === module.id)) {
-                      alert('Questo modulo è già stato aggiunto all\'offerta.');
-                      return;
-                    }
-                    setSelectedCompanyModules(prev => [...prev, module]);
-                    alert(`Modulo "${module.title || module.titolo}" aggiunto con successo!`);
-                    setIsModulePickerOpen(false);
-                  }}
-                />
               </div>
             )}
-          </div>
-        )}
 
-        {activeTab === 'trattative' && (
-          <div className="space-y-6">
-            {!activeTrattativa ? (
-              <div className="bg-gray-900 border border-gray-800 p-6 rounded-2xl space-y-6">
-                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-gray-800 pb-4">
-                  <div>
-                    <h3 className="text-base font-bold text-white uppercase">Trattative Commerciali</h3>
-                    <p className="text-xs text-gray-400 mt-0.5">
-                      Elenco delle trattative aperte e chiuse per {companyData.ragione_sociale}.
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    {(['tutte', 'aperte', 'chiuse'] as const).map((f) => (
-                      <button
-                        key={f}
-                        type="button"
-                        onClick={() => setTrattativeFiltro(f)}
-                        className={`px-3 py-1.5 rounded-xl text-xs font-semibold capitalize transition-all cursor-pointer ${
-                          trattativeFiltro === f
-                            ? 'bg-gray-800 text-white border border-gray-600'
-                            : 'bg-gray-950 text-gray-400 border border-gray-800 hover:text-gray-200'
-                        }`}
-                      >
-                        {f === 'chiuse' ? 'Fatte / Chiuse' : f}
-                      </button>
-                    ))}
-                    <button
-                      type="button"
-                      onClick={() => setShowCreateTrattativaModal(true)}
-                      className="px-4 py-2.5 bg-[#FF5500] hover:bg-orange-600 text-white text-xs font-bold rounded-xl shadow transition-all cursor-pointer uppercase tracking-wider"
-                    >
-                      + Nuova Trattativa
-                    </button>
-                  </div>
-                </div>
-
-                {loadingTrattative ? (
-                  <div className="p-8 text-center text-xs font-mono text-gray-400">Caricamento trattative in corso...</div>
-                ) : filteredTrattative.length === 0 ? (
-                  <div className="p-12 text-center border border-dashed border-gray-800 bg-gray-950 rounded-xl space-y-3">
-                    <p className="text-sm text-gray-400">Nessuna trattativa registrata per questo filtro.</p>
-                    <button
-                      type="button"
-                      onClick={() => setShowCreateTrattativaModal(true)}
-                      className="px-4 py-2.5 bg-[#FF5500] hover:bg-orange-600 text-white text-xs font-bold rounded-xl shadow transition-all cursor-pointer"
-                    >
-                      Crea la prima Trattativa
-                    </button>
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto rounded-xl border border-gray-800 bg-gray-950">
-                    <table className="w-full text-left border-collapse text-xs">
-                      <thead>
-                        <tr className="border-b border-gray-800 bg-gray-900/70 text-[10px] uppercase tracking-wider text-gray-400">
-                          <th className="px-4 py-3">Codice</th>
-                          <th className="px-4 py-3">Trattativa</th>
-                          <th className="px-4 py-3">Offerta</th>
-                          <th className="px-4 py-3">Fase</th>
-                          <th className="px-4 py-3">Stato</th>
-                          <th className="px-4 py-3 text-right">Valore</th>
-                          <th className="px-4 py-3 text-right">Prob.</th>
-                          <th className="px-4 py-3">Prossima azione</th>
-                          <th className="px-4 py-3 text-right">Azioni</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-800/80">
-                        {filteredTrattative.map((t) => (
-                          <tr
-                            key={t.id}
-                            onClick={() => setActiveTrattativa(t)}
-                            className="hover:bg-gray-900/70 transition cursor-pointer"
-                          >
-                            <td className="px-4 py-3 font-mono font-bold text-[#FF5500] whitespace-nowrap">
-                              {t.codice_trattativa || 'TRT'}
-                            </td>
-                            <td className="px-4 py-3 font-semibold text-white">{t.titolo}</td>
-                            <td className="px-4 py-3 font-mono text-gray-300 whitespace-nowrap">
-                              {t.codice_offerta || '-'}
-                            </td>
-                            <td className="px-4 py-3 text-gray-300 capitalize">{normalizzaFase(t.fase)}</td>
-                            <td className="px-4 py-3">
-                              <span className="px-2 py-0.5 bg-emerald-950 border border-emerald-800 text-emerald-300 text-[10px] font-semibold rounded uppercase">
-                                {normalizzaStato(t.stato_trattativa)}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3 text-right font-mono text-white whitespace-nowrap">
-                              € {Number(t.valore || 0).toLocaleString('it-IT')}
-                            </td>
-                            <td className="px-4 py-3 text-right font-mono text-gray-400 whitespace-nowrap">
-                              {Math.round(Number(t.probabilita ?? 0.2) * 100)}%
-                            </td>
-                            <td className="px-4 py-3 text-gray-400">{t.azione_necessaria || '-'}</td>
-                            <td className="px-4 py-3 text-right whitespace-nowrap">
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setActiveTrattativa(t);
-                                }}
-                                className="px-3 py-1.5 bg-gray-900 hover:bg-gray-800 text-white font-bold rounded-lg border border-gray-700 text-[11px] cursor-pointer"
-                              >
-                                Apri -&gt;
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <SchedaTrattativa
-                dati={buildDatiScheda(activeTrattativa)}
-                onTornaAzienda={() => setActiveTrattativa(null)}
-                onRegistraAttivita={(payload) =>
-                  handleRegistraAttivitaTrattativa(activeTrattativa.id, payload)
-                }
-                onProgrammaFollowUp={(payload) =>
-                  handleProgrammaFollowUpTrattativa(activeTrattativa.id, payload)
-                }
-                onConfermaAzioneFatta={() =>
-                  handleConfermaAzioneFattaTrattativa(activeTrattativa.id)
-                }
-                onNuovaOfferta={() => {
-                  setActiveTab('offer-builder');
-                  setShowCreateOfferModal(true);
-                }}
-                onCambiaStato={(nuovoStato) =>
-                  handleChangeTrattativaStato(activeTrattativa.id, nuovoStato)
-                }
-                onCambiaFase={(nuovaFase) =>
-                  handleChangeTrattativaFase(activeTrattativa.id, nuovaFase)
-                }
-                onModificaTrattativa={(payload) =>
-                  handleModificaTrattativa(activeTrattativa.id, payload)
-                }
-              />
+            {activeTab === 'documenti' && (
+              <DocumentsView projectId={resolvedCompanyId} />
             )}
-          </div>
-        )}
-
-        {activeTab === 'documenti' && (
-          <DocumentsView projectId={resolvedCompanyId} />
+          </>
         )}
 
       </div>
 
-      {showCreateBpModal && (
+      {showCreateBpModal && canEditBusiness && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-gray-900 border border-gray-800 rounded-2xl max-w-lg w-full p-6 space-y-5 shadow-2xl">
             <div className="flex justify-between items-center border-b border-gray-800 pb-4">
@@ -1593,7 +1710,7 @@ function CompanyPageContent() {
         </div>
       )}
 
-      {showCreateOfferModal && (
+      {showCreateOfferModal && canEditOfferBuilder && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-gray-900 border border-gray-800 rounded-2xl max-w-lg w-full p-6 space-y-5 shadow-2xl">
             <div className="flex justify-between items-center border-b border-gray-800 pb-4">
@@ -1639,7 +1756,7 @@ function CompanyPageContent() {
         </div>
       )}
 
-      {showCreateTrattativaModal && (
+      {showCreateTrattativaModal && canEditTrattative && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-gray-900 border border-gray-800 rounded-2xl max-w-lg w-full p-6 space-y-5 shadow-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center border-b border-gray-800 pb-4">

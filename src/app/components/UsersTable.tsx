@@ -3,6 +3,11 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import Link from 'next/link';
 import { createBrowserClient } from '@supabase/ssr';
+import {
+  AZIENDA_TAB_ITEMS,
+  CRUSCOTTO_TAB_ITEMS,
+  resolveGosPermissions,
+} from '@/utils/gosPermissions';
 
 export interface ProfileItem {
   id: string;
@@ -18,6 +23,14 @@ export interface ProfileItem {
     offerte?: boolean;
     utenti?: boolean;
   } | null;
+  tab_permissions?: Record<
+    string,
+    { read?: boolean; edit?: boolean; delete?: boolean }
+  > | null;
+  azienda_tab_permissions?: Record<
+    string,
+    { read?: boolean; edit?: boolean; delete?: boolean }
+  > | null;
   stato?: string;
   status?: string;
   is_online?: boolean;
@@ -55,19 +68,6 @@ export function UsersTable({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-
-  const [editingProfile, setEditingProfile] = useState<ProfileItem | null>(null);
-  const [editUser, setEditUser] = useState('');
-  const [editEmail, setEditEmail] = useState('');
-  const [editRole, setEditRole] = useState('user');
-  const [editStatus, setEditStatus] = useState('ATTIVO');
-  const [editPermissions, setEditPermissions] = useState({
-    aziende: true,
-    questionari: true,
-    offerte: true,
-    utenti: false,
-  });
-  const [savingEdit, setSavingEdit] = useState(false);
 
   const [resettingId, setResettingId] = useState<string | null>(null);
   const [deleteTargets, setDeleteTargets] = useState<ProfileItem[]>([]);
@@ -169,6 +169,34 @@ export function UsersTable({
   const getStatusValue = (p: ProfileItem) =>
     p.stato || p.status || 'ATTIVO';
 
+  const getPermissionsSummary = (p: ProfileItem) => {
+    const resolved = resolveGosPermissions({
+      ...p,
+      ruolo: p.ruolo || p.role || 'user Guest',
+    });
+
+    const cruscottoTabs = CRUSCOTTO_TAB_ITEMS.filter((t) => {
+      const f = resolved.tabPermissions[t.key];
+      return f?.read || f?.edit || f?.delete;
+    }).map((t) => t.label);
+
+    const aziendaTabs = AZIENDA_TAB_ITEMS.filter((t) => {
+      const f = resolved.aziendaTabPermissions[t.key];
+      return f?.read || f?.edit || f?.delete;
+    }).map((t) => `Az: ${t.label}`);
+
+    const combined = [...cruscottoTabs, ...aziendaTabs];
+    if (combined.length > 0) {
+      return combined.join(', ');
+    }
+
+    const legacy = Object.entries(p.permessi || {})
+      .filter(([, enabled]) => Boolean(enabled))
+      .map(([key]) => key);
+
+    return legacy.length > 0 ? legacy.join(', ') : 'standard';
+  };
+
   const filteredProfiles = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     if (!q) return profiles;
@@ -219,72 +247,6 @@ export function UsersTable({
     setSelectedIds((prev) =>
       prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
     );
-  };
-
-  const openEditModal = (profile: ProfileItem) => {
-    if (!isSuperAdmin) {
-      alert('Solo i profili superadmin possono modificare utenti e permessi.');
-      return;
-    }
-    setEditingProfile(profile);
-    setEditUser(profile.full_name || profile.nome || '');
-    setEditEmail(profile.email || '');
-    setEditRole(getRoleValue(profile));
-    setEditStatus(getStatusValue(profile));
-    setEditPermissions({
-      aziende: profile.permessi?.aziende ?? true,
-      questionari: profile.permessi?.questionari ?? true,
-      offerte: profile.permessi?.offerte ?? true,
-      utenti: profile.permessi?.utenti ?? false,
-    });
-  };
-
-  const handleSaveEdit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingProfile || !isSuperAdmin) return;
-    setSavingEdit(true);
-
-    try {
-      const updatePayload: Record<string, any> = {
-        codice_utente: editingProfile.codice_utente || generateUserCode(),
-        email: editEmail.trim(),
-        stato: editStatus,
-        permessi: editPermissions,
-      };
-
-      if ('full_name' in editingProfile || !('nome' in editingProfile)) {
-        updatePayload.full_name = editUser.trim();
-      }
-      if ('nome' in editingProfile) {
-        updatePayload.nome = editUser.trim();
-      }
-      if ('role' in editingProfile || !('ruolo' in editingProfile)) {
-        updatePayload.role = editRole;
-      }
-      if ('ruolo' in editingProfile) {
-        updatePayload.ruolo = editRole;
-      }
-
-      const { data: updated, error } = await supabase
-        .from('gos_profiles')
-        .update(updatePayload)
-        .eq('id', editingProfile.id)
-        .select('*')
-        .single();
-
-      if (error) throw error;
-
-      setProfiles((prev) =>
-        prev.map((item) =>
-          item.id === editingProfile.id ? { ...item, ...(updated || updatePayload) } : item
-        )
-      );
-      setEditingProfile(null);
-    } catch (err: any) {
-      alert('Errore durante l\'aggiornamento del profilo: ' + (err?.message || err));
-    } finally {
-      setSavingEdit(false);
-    }
   };
 
   const handleResetPassword = async (profile: ProfileItem) => {
@@ -557,9 +519,7 @@ export function UsersTable({
                 const roleVal = getRoleValue(p);
                 const statusVal = getStatusValue(p);
                 const isChecked = selectedIds.includes(p.id);
-                const activePerms = Object.entries(p.permessi || {})
-                  .filter(([, enabled]) => Boolean(enabled))
-                  .map(([key]) => key);
+                const permsSummary = getPermissionsSummary(p);
 
                 return (
                   <tr key={p.id} className="hover:bg-gray-850/50 transition-colors">
@@ -601,7 +561,7 @@ export function UsersTable({
                     </td>
                     <td className="p-4">
                       <span className="text-[11px] font-mono text-gray-300">
-                        {activePerms.length > 0 ? activePerms.join(', ') : 'standard'}
+                        {permsSummary}
                       </span>
                     </td>
                     <td className="p-4">
@@ -625,18 +585,6 @@ export function UsersTable({
 
                         {isSuperAdmin && (
                           <>
-                            <button
-                              type="button"
-                              onClick={() => openEditModal(p)}
-                              style={{
-                                ...rowActionStyle,
-                                backgroundColor: '#374151',
-                                color: '#ffffff',
-                              }}
-                              className="hover:opacity-90 transition-all cursor-pointer"
-                            >
-                              Modifica
-                            </button>
                             <button
                               type="button"
                               disabled={resettingId === p.id}
@@ -671,140 +619,6 @@ export function UsersTable({
               })}
             </tbody>
           </table>
-        </div>
-      )}
-
-      {/* MODALE MODIFICA UTENTE, EMAIL, RUOLO, PERMESSI E STATO (SOLO SUPERADMIN) */}
-      {editingProfile && isSuperAdmin && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
-          <div className="bg-gray-900 border border-gray-700 rounded-none max-w-md w-full p-6 space-y-5 shadow-2xl">
-            <div className="border-b border-gray-800 pb-3">
-              <div className="text-[10px] font-mono uppercase text-amber-400">
-                Aggiornamento Profilo • {editingProfile.codice_utente || 'USR-00000'}
-              </div>
-              <h3 className="text-base font-black text-white">{getDisplayName(editingProfile)}</h3>
-            </div>
-
-            <form onSubmit={handleSaveEdit} className="space-y-4">
-              <div>
-                <label className="block text-gray-400 mb-1 font-bold uppercase text-[10px]">
-                  Utente
-                </label>
-                <input
-                  type="text"
-                  value={editUser}
-                  onChange={(e) => setEditUser(e.target.value)}
-                  className="w-full bg-gray-950 border border-gray-700 px-3 py-2 rounded-none text-white text-xs focus:outline-none focus:border-[#FF5500]"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-gray-400 mb-1 font-bold uppercase text-[10px]">
-                  Email
-                </label>
-                <input
-                  type="email"
-                  value={editEmail}
-                  onChange={(e) => setEditEmail(e.target.value)}
-                  className="w-full bg-gray-950 border border-gray-700 px-3 py-2 rounded-none text-white text-xs focus:outline-none focus:border-[#FF5500]"
-                  required
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-gray-400 mb-1 font-bold uppercase text-[10px]">
-                    Ruolo
-                  </label>
-                  <select
-                    value={editRole}
-                    onChange={(e) => setEditRole(e.target.value)}
-                    className="w-full bg-gray-950 border border-gray-700 px-3 py-2 rounded-none text-white text-xs focus:outline-none focus:border-[#FF5500]"
-                  >
-                    <option value="superadmin">superadmin</option>
-                    <option value="admin">admin</option>
-                    <option value="advisor">advisor</option>
-                    <option value="Network Partner">Network Partner</option>
-                    <option value="user">user</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-gray-400 mb-1 font-bold uppercase text-[10px]">
-                    Stato
-                  </label>
-                  <select
-                    value={editStatus}
-                    onChange={(e) => setEditStatus(e.target.value)}
-                    className="w-full bg-gray-950 border border-gray-700 px-3 py-2 rounded-none text-white text-xs focus:outline-none focus:border-[#FF5500]"
-                  >
-                    <option value="ATTIVO">ATTIVO</option>
-                    <option value="SOSPESO">SOSPESO</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-gray-400 mb-2 font-bold uppercase text-[10px]">
-                  Permessi Moduli
-                </label>
-                <div className="grid grid-cols-2 gap-2 bg-gray-950 border border-gray-800 p-3 rounded-none text-xs text-gray-200">
-                  {(
-                    [
-                      ['aziende', 'Controllo Aziende'],
-                      ['questionari', 'Libreria Questionari'],
-                      ['offerte', 'Catalogo Offerte'],
-                      ['utenti', 'Gestione Utenti'],
-                    ] as const
-                  ).map(([key, label]) => (
-                    <label key={key} className="inline-flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={editPermissions[key]}
-                        onChange={(e) =>
-                          setEditPermissions((prev) => ({
-                            ...prev,
-                            [key]: e.target.checked,
-                          }))
-                        }
-                        style={checkboxStyle}
-                      />
-                      <span>{label}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              <div className="flex justify-end gap-2 pt-3 border-t border-gray-800">
-                <button
-                  type="button"
-                  disabled={savingEdit}
-                  onClick={() => setEditingProfile(null)}
-                  style={{
-                    ...topActionStyle,
-                    backgroundColor: '#1f2937',
-                    color: '#d1d5db',
-                  }}
-                  className="hover:opacity-90 cursor-pointer"
-                >
-                  Annulla
-                </button>
-                <button
-                  type="submit"
-                  disabled={savingEdit}
-                  style={{
-                    ...topActionStyle,
-                    backgroundColor: '#059669',
-                    color: '#ffffff',
-                  }}
-                  className="hover:opacity-90 disabled:opacity-50 cursor-pointer"
-                >
-                  {savingEdit ? 'Salvataggio...' : 'Salva Modifiche'}
-                </button>
-              </div>
-            </form>
-          </div>
         </div>
       )}
 

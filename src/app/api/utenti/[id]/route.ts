@@ -111,9 +111,13 @@ export async function PATCH(
 
     if (typeof updates.email === 'string') payload.email = updates.email.trim();
     if (typeof updates.stato === 'string') payload.stato = updates.stato;
-    if (updates.permessi && typeof updates.permessi === 'object') {
-      payload.permessi = updates.permessi;
-    }
+
+    const mergedPermessi: Record<string, any> =
+      updates.permessi && typeof updates.permessi === 'object'
+        ? { ...updates.permessi }
+        : existing.permessi && typeof existing.permessi === 'object'
+          ? { ...existing.permessi }
+          : {};
 
     if (typeof updates.utente === 'string') {
       if ('full_name' in existing || !('nome' in existing)) {
@@ -135,6 +139,7 @@ export async function PATCH(
     }
 
     const granularKeys = [
+      'can_edit_aziende',
       'can_delete_aziende',
       'can_edit_offerte',
       'can_delete_offerte',
@@ -148,6 +153,30 @@ export async function PATCH(
       if (typeof updates[key] === 'boolean' && key in existing) {
         payload[key] = updates[key];
       }
+    }
+
+    if (updates.tab_permissions && typeof updates.tab_permissions === 'object') {
+      if ('tab_permissions' in existing) {
+        payload.tab_permissions = updates.tab_permissions;
+      }
+      mergedPermessi.tab_permissions = updates.tab_permissions;
+    }
+
+    if (
+      updates.azienda_tab_permissions &&
+      typeof updates.azienda_tab_permissions === 'object'
+    ) {
+      if ('azienda_tab_permissions' in existing) {
+        payload.azienda_tab_permissions = updates.azienda_tab_permissions;
+      }
+      mergedPermessi.azienda_tab_permissions = updates.azienda_tab_permissions;
+    }
+
+    if (
+      ('permessi' in existing && Object.keys(mergedPermessi).length > 0) ||
+      (updates.permessi && typeof updates.permessi === 'object')
+    ) {
+      payload.permessi = mergedPermessi;
     }
 
     const { data: updatedProfile, error: updErr } = await supabaseServer

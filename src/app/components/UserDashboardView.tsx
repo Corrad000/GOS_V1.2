@@ -13,10 +13,15 @@ import {
   type Voce,
 } from '@/app/utenti/[id]/RiepilogoKanbanDash';
 import { useCalendarSync } from './CalendarSyncProvider';
+import {
+  resolveGosPermissions,
+  type CruscottoTabKey,
+  type GosUserPermissions,
+} from '@/utils/gosPermissions';
 
 interface UserDashboardViewProps {
   userId?: string;
-  userRole: 'admin' | 'user' | 'advisor' | 'Network Partner';
+  userRole: string;
   userName: string;
   companies: CompanyItem[];
   trattative?: Voce[];
@@ -39,6 +44,17 @@ type RadarFilter =
   | 'programmata'
   | 'senza_azione'
   | 'ferma';
+
+const MAIN_TAB_TO_PERMISSION_KEY: Record<MainTab, CruscottoTabKey> = {
+  cruscotto: 'cruscotto_operativo',
+  trattative: 'trattative',
+  aziende: 'database_aziende',
+  contatti: 'rubrica_contatti',
+  offerte: 'offer_builder',
+  fatture: 'invoice_generator',
+  questionari: 'questionari',
+  utenti: 'utenti_permessi',
+};
 
 const PHASE_WEIGHT: Record<string, number> = {
   lead: 0.2,
@@ -103,6 +119,7 @@ export function UserDashboardView({
   const [activeTab, setActiveTab] = useState<MainTab>('cruscotto');
   const [localCompanies, setLocalCompanies] = useState<CompanyItem[]>(companies);
   const [localDeals, setLocalDeals] = useState<Voce[]>(trattative);
+  const [liveProfile, setLiveProfile] = useState<any | null>(null);
 
   const [radarFilter, setRadarFilter] = useState<RadarFilter>('tutte');
   const [companyScope, setCompanyScope] = useState<'mie' | 'tutte'>('mie');
@@ -129,6 +146,71 @@ export function UserDashboardView({
       ),
     []
   );
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadCurrentUserProfile() {
+      try {
+        let authUser: any = null;
+        try {
+          const { data: authData } = await supabase.auth.getUser();
+          authUser = authData?.user || null;
+        } catch {
+          authUser = null;
+        }
+
+        const { data: profiles } = await supabase.from('gos_profiles').select('*');
+        const list = Array.isArray(profiles) ? profiles : [];
+
+        const matched =
+          list.find((p: any) => userId && String(p.id) === String(userId)) ||
+          list.find(
+            (p: any) =>
+              authUser?.email &&
+              (p.email || '').toLowerCase() === String(authUser.email).toLowerCase()
+          ) ||
+          list.find(
+            (p: any) =>
+              userName &&
+              (p.email || '').toLowerCase() === String(userName).toLowerCase()
+          ) ||
+          null;
+
+        if (active) {
+          setLiveProfile(
+            matched || {
+              id: authUser?.id || userId || undefined,
+              email: authUser?.email || userName || undefined,
+              ruolo: userRole,
+            }
+          );
+        }
+      } catch (err) {
+        console.warn('Errore lettura profilo per permessi:', err);
+        if (active) {
+          setLiveProfile({
+            id: userId || undefined,
+            email: userName || undefined,
+            ruolo: userRole,
+          });
+        }
+      }
+    }
+
+    loadCurrentUserProfile();
+    return () => {
+      active = false;
+    };
+  }, [supabase, userId, userName, userRole]);
+
+  const permissions: GosUserPermissions = useMemo(() => {
+    return resolveGosPermissions(
+      liveProfile || {
+        ruolo: userRole,
+      }
+    );
+  }, [liveProfile, userRole]);
 
   useEffect(() => {
     setLocalCompanies(companies);
@@ -164,6 +246,7 @@ export function UserDashboardView({
 
   useEffect(() => {
     if (activeTab !== 'questionari') return;
+    if (!permissions.tabPermissions.questionari.read) return;
 
     async function loadQuestionnairesGallery() {
       setLoadingQuestionnaires(true);
@@ -192,7 +275,7 @@ export function UserDashboardView({
     }
 
     loadQuestionnairesGallery();
-  }, [activeTab, supabase]);
+  }, [activeTab, supabase, permissions.tabPermissions.questionari.read]);
 
   const activeDeals = useMemo(() => {
     return localDeals.filter((d) => {
@@ -336,7 +419,21 @@ export function UserDashboardView({
     };
   }, [activeDeals, workingCompanies, enrichedDeals]);
 
+  const canEditCruscotto = permissions.tabPermissions.cruscotto_operativo.edit;
+  const canEditQuestionari = permissions.tabPermissions.questionari.edit;
+  const canDeleteQuestionari = permissions.tabPermissions.questionari.delete;
+  const canCreateOrEditAziende =
+    permissions.canCreateAziende ||
+    permissions.canEditAziende ||
+    permissions.tabPermissions.database_aziende.edit;
+  const canDeleteAziende =
+    permissions.canDeleteAziende || permissions.tabPermissions.database_aziende.delete;
+
   const handleMarkDealDone = async (deal: Voce) => {
+    if (!canEditCruscotto) {
+      setFeedbackMsg('Non hai i permessi di modifica sul Cruscotto Operativo.');
+      return;
+    }
     setBusyDealId(deal.id);
     setFeedbackMsg(null);
     const nowIso = new Date().toISOString();
@@ -383,6 +480,10 @@ export function UserDashboardView({
   };
 
   const handlePostponeDeal = async (deal: Voce) => {
+    if (!canEditCruscotto) {
+      setFeedbackMsg('Non hai i permessi di modifica sul Cruscotto Operativo.');
+      return;
+    }
     setBusyDealId(deal.id);
     setFeedbackMsg(null);
     const base = deal.azioneProgrammata?.data ? new Date(deal.azioneProgrammata.data) : new Date();
@@ -452,6 +553,10 @@ export function UserDashboardView({
   }, [masterQuestionnaires, filterCategoryId]);
 
   const handleDeleteQuestionnaire = async (id: string) => {
+    if (!canDeleteQuestionari) {
+      alert('Non hai i permessi per eliminare questionari.');
+      return;
+    }
     if (!confirm('Sei sicuro di voler eliminare questo questionario master?')) return;
     try {
       const { error } = await supabase.from('gos_moduli').delete().eq('id', id);
@@ -474,6 +579,21 @@ export function UserDashboardView({
     { key: 'utenti', label: 'Utenti & Permessi' },
   ];
 
+  const visibleTabs = useMemo(() => {
+    return navTabs.filter((t) => {
+      const permKey = MAIN_TAB_TO_PERMISSION_KEY[t.key];
+      return Boolean(permissions.tabPermissions[permKey]?.read);
+    });
+  }, [permissions.tabPermissions]);
+
+  useEffect(() => {
+    if (visibleTabs.length === 0) return;
+    const isCurrentAllowed = visibleTabs.some((t) => t.key === activeTab);
+    if (!isCurrentAllowed) {
+      setActiveTab(visibleTabs[0].key);
+    }
+  }, [visibleTabs, activeTab]);
+
   const radarFilters: { key: RadarFilter; label: string }[] = [
     { key: 'tutte', label: 'Tutte' },
     { key: 'scaduta', label: 'Scadute' },
@@ -482,6 +602,9 @@ export function UserDashboardView({
     { key: 'senza_azione', label: 'Senza azione' },
     { key: 'ferma', label: 'Ferme >14gg' },
   ];
+
+  const currentTabReadAllowed =
+    permissions.tabPermissions[MAIN_TAB_TO_PERMISSION_KEY[activeTab]]?.read ?? false;
 
   return (
     <div className="mx-auto max-w-[1440px] px-5 py-6 md:px-8">
@@ -505,7 +628,7 @@ export function UserDashboardView({
       </div>
 
       <nav aria-label="Viste principali" className="mb-6 flex flex-wrap gap-1 border-b border-[#1B2540]">
-        {navTabs.map((t) => {
+        {visibleTabs.map((t) => {
           const active = activeTab === t.key;
           return (
             <button
@@ -530,424 +653,443 @@ export function UserDashboardView({
         </div>
       )}
 
-      {activeTab === 'cruscotto' && (
-        <div className="space-y-5">
-          <section className="grid grid-cols-1 gap-3.5 md:grid-cols-3">
-            <div className="rounded-xl border border-[#1B2540] bg-[#0B132B] px-5 py-4">
-              <div className="text-[11px] font-semibold uppercase tracking-widest text-[#8A94A8]">
-                TRATTATIVE ATTIVE
-              </div>
-              <div className="mt-2 text-2xl font-bold text-white">
-                {eur.format(kpiMetrics.totalActiveValue)}
-              </div>
-              <div className="mt-1 text-xs text-[#8A94A8]">
-                ponderato {eur.format(Math.round(kpiMetrics.weightedValue))}
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-[#1B2540] bg-[#0B132B] px-5 py-4">
-              <div className="text-[11px] font-semibold uppercase tracking-widest text-[#8A94A8]">
-                AZIENDE IN LAVORAZIONE
-              </div>
-              <div className="mt-2 flex items-baseline gap-2">
-                <span className="text-2xl font-bold text-white">{kpiMetrics.workingTotal}</span>
-                <span className="text-xs text-[#8A94A8]">attive / follow-up</span>
-              </div>
-              <div className="mt-1 text-xs text-[#8A94A8]">
-                {kpiMetrics.inLavorazioneCount} in lavorazione · {kpiMetrics.followUpCount} in follow-up
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-[#1B2540] bg-[#0B132B] px-5 py-4">
-              <div className="text-[11px] font-semibold uppercase tracking-widest text-[#8A94A8]">
-                AZIONI DA FARE OGGI
-              </div>
-              <div className="mt-2 flex items-baseline gap-2">
-                <span className="text-2xl font-bold text-white">{kpiMetrics.dueTodayTotal}</span>
-                <span className="text-xs text-[#8A94A8]">urgenti &amp; programmate</span>
-              </div>
-              <div className="mt-1 text-xs">
-                <span className="font-medium text-amber-400">
-                  {kpiMetrics.overdueCount} scadute
-                </span>
-                <span className="text-[#8A94A8]"> · </span>
-                <span className="font-medium text-amber-400">
-                  {kpiMetrics.scheduledCount} programmate
-                </span>
-              </div>
-            </div>
-          </section>
-
-          <section className="grid grid-cols-12 items-start gap-5">
-            <div className="col-span-12 rounded-2xl border border-[#1B2540] bg-[#0B132B] p-5 lg:col-span-5">
-              <div className="mb-3.5 flex items-center justify-between">
-                <h2 className="text-[15px] font-bold tracking-wide text-white">
-                  RADAR AZIONI &amp; TRATTATIVE PRIORITARIE
-                </h2>
-                <span className="text-xs text-[#8A94A8]">
-                  {filteredRadarDeals.length} di {enrichedDeals.length}
-                </span>
-              </div>
-
-              <div className="mb-4 flex flex-wrap gap-1.5">
-                {radarFilters.map((f) => {
-                  const isCurrent = radarFilter === f.key;
-                  return (
-                    <button
-                      key={f.key}
-                      type="button"
-                      onClick={() => setRadarFilter(f.key)}
-                      className={`cursor-pointer rounded-full border px-3 py-1 text-xs transition-colors ${
-                        isCurrent
-                          ? 'border-[#FF5500] bg-[#FF5500] font-semibold text-white'
-                          : 'border-[#2A3A66] font-medium text-[#B9C3D9] hover:bg-[#111E42]'
-                      }`}
-                    >
-                      {f.label}
-                    </button>
-                  );
-                })}
-              </div>
-
-              <div className="flex flex-col gap-2.5">
-                {filteredRadarDeals.map((d) => {
-                  const busy = busyDealId === d.id;
-                  const borderLeftClass =
-                    d.statoAzione === 'scaduta'
-                      ? 'border-l-red-400'
-                      : d.statoAzione === 'oggi'
-                        ? 'border-l-amber-400'
-                        : d.statoAzione === 'programmata'
-                          ? 'border-l-emerald-400'
-                          : 'border-l-slate-500';
-
-                  const dueColorClass =
-                    d.statoAzione === 'scaduta' || d.isStagnant
-                      ? 'text-red-400'
-                      : d.statoAzione === 'oggi'
-                        ? 'text-amber-400'
-                        : d.statoAzione === 'programmata'
-                          ? 'text-emerald-400'
-                          : 'text-[#8A94A8]';
-
-                  return (
-                    <article
-                      key={d.id}
-                      className={`rounded-[10px] border border-l-[3px] border-[#1B2540] bg-[#111E42] p-3.5 ${borderLeftClass}`}
-                    >
-                      <div className="flex items-start justify-between gap-2.5">
-                        <div className="min-w-0">
-                          <div className="text-sm font-semibold text-white">{d.nome}</div>
-                          <div className="mt-0.5 text-xs text-[#8A94A8]">{d.azienda.nome}</div>
-                        </div>
-                        <div className="whitespace-nowrap text-[15px] font-bold text-white">
-                          {eur.format(d.valore)}
-                        </div>
-                      </div>
-
-                      <div className="mt-2.5 text-[13px] text-[#D5DCEB]">
-                        {d.azioneProgrammata?.titolo || d.azioneNecessaria}
-                      </div>
-
-                      <div className="mt-3 flex items-center gap-2">
-                        <button
-                          type="button"
-                          disabled={busy}
-                          onClick={() => handleMarkDealDone(d)}
-                          className="cursor-pointer rounded-[7px] bg-[#FF5500] px-3.5 py-1.5 text-xs font-bold text-white hover:bg-[#FF7A3D] disabled:opacity-50"
-                        >
-                          Fatto
-                        </button>
-                        <button
-                          type="button"
-                          disabled={busy}
-                          onClick={() => handlePostponeDeal(d)}
-                          className="cursor-pointer rounded-[7px] border border-[#2A3A66] bg-[#1B2540] px-3 py-1.5 text-xs font-semibold text-[#E6EAF2] hover:bg-[#25335A] disabled:opacity-50"
-                        >
-                          Rinvia +3 gg
-                        </button>
-                        <span className={`ml-auto text-[11px] font-semibold ${dueColorClass}`}>
-                          {d.dueLabel}
-                        </span>
-                      </div>
-                    </article>
-                  );
-                })}
-
-                {filteredRadarDeals.length === 0 && (
-                  <p className="py-8 text-center text-sm text-[#8A94A8]">
-                    Nessuna trattativa prioritaria per questo filtro.
-                  </p>
-                )}
-              </div>
-            </div>
-
-            <div className="col-span-12 rounded-2xl border border-[#1B2540] bg-[#0B132B] p-5 lg:col-span-7">
-              <div className="mb-3.5 flex flex-wrap items-center justify-between gap-3">
-                <h2 className="text-[15px] font-bold tracking-wide text-white">
-                  AZIENDE IN LAVORAZIONE &amp; FOLLOW-UP
-                </h2>
-
-                <div className="inline-flex overflow-hidden rounded-lg border border-[#2A3A66]">
-                  <button
-                    type="button"
-                    onClick={() => setCompanyScope('mie')}
-                    className={`cursor-pointer px-3 py-1.5 text-xs ${
-                      companyScope === 'mie'
-                        ? 'bg-[#111E42] font-semibold text-white'
-                        : 'font-medium text-[#8A94A8] hover:text-white'
-                    }`}
-                  >
-                    Le mie aziende
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setCompanyScope('tutte')}
-                    className={`cursor-pointer px-3 py-1.5 text-xs ${
-                      companyScope === 'tutte'
-                        ? 'bg-[#111E42] font-semibold text-white'
-                        : 'font-medium text-[#8A94A8] hover:text-white'
-                    }`}
-                  >
-                    Tutte
-                  </button>
+      {!currentTabReadAllowed ? (
+        <div className="rounded-2xl border border-[#1B2540] bg-[#0B132B] p-8 text-center text-sm text-[#8A94A8]">
+          Non hai i permessi di lettura per questa sezione.
+        </div>
+      ) : (
+        <>
+          {activeTab === 'cruscotto' && (
+            <div className="space-y-5">
+              <section className="grid grid-cols-1 gap-3.5 md:grid-cols-3">
+                <div className="rounded-xl border border-[#1B2540] bg-[#0B132B] px-5 py-4">
+                  <div className="text-[11px] font-semibold uppercase tracking-widest text-[#8A94A8]">
+                    TRATTATIVE ATTIVE
+                  </div>
+                  <div className="mt-2 text-2xl font-bold text-white">
+                    {eur.format(kpiMetrics.totalActiveValue)}
+                  </div>
+                  <div className="mt-1 text-xs text-[#8A94A8]">
+                    ponderato {eur.format(Math.round(kpiMetrics.weightedValue))}
+                  </div>
                 </div>
-              </div>
 
-              <label
-                htmlFor="cerca-azienda-cruscotto"
-                className="mb-1.5 block text-[11px] font-semibold uppercase tracking-widest text-[#8A94A8]"
-              >
-                CERCA
-              </label>
-              <input
-                id="cerca-azienda-cruscotto"
-                type="search"
-                value={companySearch}
-                onChange={(e) => setCompanySearch(e.target.value)}
-                placeholder="Cerca azienda attiva, codice AZ, referente..."
-                className="mb-4 w-full rounded-[9px] border border-[#2A3A66] bg-[#090D16] px-3.5 py-2.5 text-sm text-[#E6EAF2] placeholder:text-[#5B6680] focus:border-[#FF5500] focus:outline-none"
-              />
+                <div className="rounded-xl border border-[#1B2540] bg-[#0B132B] px-5 py-4">
+                  <div className="text-[11px] font-semibold uppercase tracking-widest text-[#8A94A8]">
+                    AZIENDE IN LAVORAZIONE
+                  </div>
+                  <div className="mt-2 flex items-baseline gap-2">
+                    <span className="text-2xl font-bold text-white">{kpiMetrics.workingTotal}</span>
+                    <span className="text-xs text-[#8A94A8]">attive / follow-up</span>
+                  </div>
+                  <div className="mt-1 text-xs text-[#8A94A8]">
+                    {kpiMetrics.inLavorazioneCount} in lavorazione · {kpiMetrics.followUpCount} in follow-up
+                  </div>
+                </div>
 
-              <div className="overflow-x-auto">
-                <table className="w-full border-collapse text-[13px]">
-                  <thead>
-                    <tr className="text-left text-[11px] font-semibold uppercase tracking-widest text-[#8A94A8]">
-                      <th className="border-b border-[#1B2540] px-2 py-2.5">AZIENDA</th>
-                      <th className="border-b border-[#1B2540] px-2 py-2.5">STATO</th>
-                      <th className="border-b border-[#1B2540] px-2 py-2.5 text-right">VALORE</th>
-                      <th className="border-b border-[#1B2540] px-2 py-2.5 text-right">
-                        <span className="sr-only">Azioni</span>
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {workingCompanies.map((c) => {
-                      const inWork = c.operationalStatus === 'IN_LAVORAZIONE';
+                <div className="rounded-xl border border-[#1B2540] bg-[#0B132B] px-5 py-4">
+                  <div className="text-[11px] font-semibold uppercase tracking-widest text-[#8A94A8]">
+                    AZIONI DA FARE OGGI
+                  </div>
+                  <div className="mt-2 flex items-baseline gap-2">
+                    <span className="text-2xl font-bold text-white">{kpiMetrics.dueTodayTotal}</span>
+                    <span className="text-xs text-[#8A94A8]">urgenti &amp; programmate</span>
+                  </div>
+                  <div className="mt-1 text-xs">
+                    <span className="font-medium text-amber-400">
+                      {kpiMetrics.overdueCount} scadute
+                    </span>
+                    <span className="text-[#8A94A8]"> · </span>
+                    <span className="font-medium text-amber-400">
+                      {kpiMetrics.scheduledCount} programmate
+                    </span>
+                  </div>
+                </div>
+              </section>
+
+              <section className="grid grid-cols-12 items-start gap-5">
+                <div className="col-span-12 rounded-2xl border border-[#1B2540] bg-[#0B132B] p-5 lg:col-span-5">
+                  <div className="mb-3.5 flex items-center justify-between">
+                    <h2 className="text-[15px] font-bold tracking-wide text-white">
+                      RADAR AZIONI &amp; TRATTATIVE PRIORITARIE
+                    </h2>
+                    <span className="text-xs text-[#8A94A8]">
+                      {filteredRadarDeals.length} di {enrichedDeals.length}
+                    </span>
+                  </div>
+
+                  <div className="mb-4 flex flex-wrap gap-1.5">
+                    {radarFilters.map((f) => {
+                      const isCurrent = radarFilter === f.key;
                       return (
-                        <tr key={c.id} className="hover:bg-[#111E42]/30">
-                          <td className="border-b border-[#151F38] px-2 py-3">
-                            <div className="font-semibold text-white">{c.name}</div>
-                            <div className="text-[11px] text-[#8A94A8]">
-                              {c.code} · {c.subtitleNote}
+                        <button
+                          key={f.key}
+                          type="button"
+                          onClick={() => setRadarFilter(f.key)}
+                          className={`cursor-pointer rounded-full border px-3 py-1 text-xs transition-colors ${
+                            isCurrent
+                              ? 'border-[#FF5500] bg-[#FF5500] font-semibold text-white'
+                              : 'border-[#2A3A66] font-medium text-[#B9C3D9] hover:bg-[#111E42]'
+                          }`}
+                        >
+                          {f.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <div className="flex flex-col gap-2.5">
+                    {filteredRadarDeals.map((d) => {
+                      const busy = busyDealId === d.id || !canEditCruscotto;
+                      const borderLeftClass =
+                        d.statoAzione === 'scaduta'
+                          ? 'border-l-red-400'
+                          : d.statoAzione === 'oggi'
+                            ? 'border-l-amber-400'
+                            : d.statoAzione === 'programmata'
+                              ? 'border-l-emerald-400'
+                              : 'border-l-slate-500';
+
+                      const dueColorClass =
+                        d.statoAzione === 'scaduta' || d.isStagnant
+                          ? 'text-red-400'
+                          : d.statoAzione === 'oggi'
+                            ? 'text-amber-400'
+                            : d.statoAzione === 'programmata'
+                              ? 'text-emerald-400'
+                              : 'text-[#8A94A8]';
+
+                      return (
+                        <article
+                          key={d.id}
+                          className={`rounded-[10px] border border-l-[3px] border-[#1B2540] bg-[#111E42] p-3.5 ${borderLeftClass}`}
+                        >
+                          <div className="flex items-start justify-between gap-2.5">
+                            <div className="min-w-0">
+                              <div className="text-sm font-semibold text-white">{d.nome}</div>
+                              <div className="mt-0.5 text-xs text-[#8A94A8]">{d.azienda.nome}</div>
                             </div>
-                          </td>
-                          <td className="border-b border-[#151F38] px-2 py-3">
-                            <span
-                              className={`rounded-md border px-2 py-1 text-[10px] font-bold tracking-wider ${
-                                inWork
-                                  ? 'border-emerald-500/35 bg-emerald-500/15 text-emerald-400'
-                                  : 'border-amber-500/35 bg-amber-500/15 text-amber-400'
-                              }`}
-                            >
-                              {inWork ? 'IN LAVORAZIONE' : 'FOLLOW-UP'}
-                            </span>
-                          </td>
-                          <td className="border-b border-[#151F38] px-2 py-3 text-right font-semibold text-white">
-                            {eur.format(c.displayValue)}
-                          </td>
-                          <td className="border-b border-[#151F38] px-2 py-3 text-right">
+                            <div className="whitespace-nowrap text-[15px] font-bold text-white">
+                              {eur.format(d.valore)}
+                            </div>
+                          </div>
+
+                          <div className="mt-2.5 text-[13px] text-[#D5DCEB]">
+                            {d.azioneProgrammata?.titolo || d.azioneNecessaria}
+                          </div>
+
+                          <div className="mt-3 flex items-center gap-2">
                             <button
                               type="button"
-                              onClick={() => router.push(`/aziende/${c.id}`)}
-                              className="cursor-pointer rounded-md border border-[#2A3A66] bg-[#1B2540] px-2.5 py-1.5 text-[11px] font-semibold text-[#E6EAF2] hover:bg-[#25335A]"
+                              disabled={busy}
+                              onClick={() => handleMarkDealDone(d)}
+                              className="cursor-pointer rounded-[7px] bg-[#FF5500] px-3.5 py-1.5 text-xs font-bold text-white hover:bg-[#FF7A3D] disabled:cursor-not-allowed disabled:opacity-40"
                             >
-                              DETTAGLI
+                              Fatto
                             </button>
-                          </td>
-                        </tr>
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => handlePostponeDeal(d)}
+                              className="cursor-pointer rounded-[7px] border border-[#2A3A66] bg-[#1B2540] px-3 py-1.5 text-xs font-semibold text-[#E6EAF2] hover:bg-[#25335A] disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                              Rinvia +3 gg
+                            </button>
+                            <span className={`ml-auto text-[11px] font-semibold ${dueColorClass}`}>
+                              {d.dueLabel}
+                            </span>
+                          </div>
+                        </article>
                       );
                     })}
 
-                    {workingCompanies.length === 0 && (
-                      <tr>
-                        <td colSpan={4} className="py-8 text-center text-sm text-[#8A94A8]">
-                          Nessuna azienda attiva trovata con i filtri attuali.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </section>
-        </div>
-      )}
-
-      {activeTab === 'trattative' && (
-        <RiepilogoKanbanDash
-          dati={localDeals}
-          userId={userId}
-          advisorName={userName}
-        />
-      )}
-
-      {activeTab === 'aziende' && (
-        <CompanyTable
-          companies={localCompanies}
-          title="CONTROLLO AZIENDE"
-          subtitle="Panoramica di tutte le aziende inserite nel database, advisor di riferimento e contratti attivi."
-          showRegisterButton={true}
-          onCompaniesDeleted={(deletedIds) => {
-            const deletedSet = new Set(deletedIds);
-            setLocalCompanies((prev) => prev.filter((c) => !deletedSet.has(c.id)));
-          }}
-        />
-      )}
-
-      {activeTab === 'contatti' && <ContactsDirectoryView />}
-
-      {activeTab === 'offerte' && <CatalogDashboardView />}
-
-      {activeTab === 'fatture' && (
-        <InvoiceGeneratorView initialCompanies={localCompanies} />
-      )}
-
-      {activeTab === 'questionari' && (
-        <div className="space-y-6 rounded-2xl border border-[#1B2540] bg-[#0B132B] p-6 shadow-xl">
-          <div className="flex flex-col items-start justify-between gap-4 border-b border-[#1B2540] pb-4 md:flex-row md:items-center">
-            <div>
-              <h3 className="text-base font-black uppercase tracking-wider text-white">
-                Gallery Questionari Master Attivi / Creati
-              </h3>
-              <p className="mt-0.5 text-xs text-gray-400">
-                Consulta i questionari disponibili o apri la pagina dedicata per crearne e lavorarne uno.
-              </p>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => router.push('/questionari-master?mode=new')}
-              className="cursor-pointer rounded-lg bg-[#FF5500] px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-white shadow transition-all hover:bg-orange-600"
-            >
-              + Aggiungi Questionario
-            </button>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setFilterCategoryId('all')}
-              className={`cursor-pointer rounded-lg border px-3 py-1.5 text-xs font-bold transition-all ${
-                filterCategoryId === 'all'
-                  ? 'border-orange-500 bg-[#FF5500] text-white'
-                  : 'border-[#2A3A66] bg-[#090D16] text-gray-400 hover:text-white'
-              }`}
-            >
-              Tutte le categorie ({masterQuestionnaires.length})
-            </button>
-            {categories.map((cat) => (
-              <button
-                key={cat.id}
-                type="button"
-                onClick={() => setFilterCategoryId(String(cat.id))}
-                className={`cursor-pointer rounded-lg border px-3 py-1.5 text-xs font-bold transition-all ${
-                  String(filterCategoryId) === String(cat.id)
-                    ? 'border-orange-500 bg-[#FF5500] text-white'
-                    : 'border-[#2A3A66] bg-[#090D16] text-gray-400 hover:text-white'
-                }`}
-              >
-                {cat.nome}
-              </button>
-            ))}
-          </div>
-
-          {loadingQuestionnaires ? (
-            <div className="p-8 text-center font-mono text-xs text-gray-400">
-              Caricamento gallery questionari...
-            </div>
-          ) : filteredQuestionnaires.length === 0 ? (
-            <div className="space-y-3 rounded-xl border border-dashed border-[#2A3A66] bg-[#090D16] p-12 text-center">
-              <p className="text-sm text-gray-400">
-                Nessun questionario master trovato per il filtro selezionato.
-              </p>
-              <button
-                type="button"
-                onClick={() => router.push('/questionari-master?mode=new')}
-                className="cursor-pointer rounded-lg bg-[#FF5500] px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-white shadow transition-all hover:bg-orange-600"
-              >
-                + Aggiungi il primo Questionario
-              </button>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {filteredQuestionnaires.map((q) => {
-                const catName =
-                  categoryMap[String(q.categoria_id)] ||
-                  q.categoria_nome ||
-                  'Categoria non assegnata';
-                return (
-                  <div
-                    key={q.id}
-                    className="flex flex-col justify-between space-y-4 rounded-xl border border-[#2A3A66] bg-[#111E42] p-5 shadow-md transition-all hover:border-slate-500"
-                  >
-                    <div className="space-y-2.5">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="rounded border border-slate-700 bg-[#090D16] px-2 py-0.5 font-mono text-[10px] font-bold uppercase text-[#FF5500]">
-                          {q.codice_modulo || 'QST'}
-                        </span>
-                        <span className="rounded border border-emerald-700 bg-emerald-950 px-2 py-0.5 text-[10px] font-semibold uppercase text-emerald-300">
-                          {q.stato || 'Attivo'}
-                        </span>
-                      </div>
-
-                      <div className="font-mono text-[11px] uppercase tracking-wide text-amber-300">
-                        Categoria: {catName}
-                      </div>
-
-                      <h4 className="text-sm font-bold uppercase text-white">{q.titolo}</h4>
-                      <p className="line-clamp-2 text-xs text-slate-300">
-                        {q.descrizione || 'Nessuna descrizione inserita.'}
+                    {filteredRadarDeals.length === 0 && (
+                      <p className="py-8 text-center text-sm text-[#8A94A8]">
+                        Nessuna trattativa prioritaria per questo filtro.
                       </p>
-                    </div>
+                    )}
+                  </div>
+                </div>
 
-                    <div className="flex items-center justify-between gap-2 border-t border-[#1B2540] pt-3">
+                <div className="col-span-12 rounded-2xl border border-[#1B2540] bg-[#0B132B] p-5 lg:col-span-7">
+                  <div className="mb-3.5 flex flex-wrap items-center justify-between gap-3">
+                    <h2 className="text-[15px] font-bold tracking-wide text-white">
+                      AZIENDE IN LAVORAZIONE &amp; FOLLOW-UP
+                    </h2>
+
+                    <div className="inline-flex overflow-hidden rounded-lg border border-[#2A3A66]">
                       <button
                         type="button"
-                        onClick={() => handleDeleteQuestionnaire(q.id)}
-                        className="cursor-pointer rounded-md border border-red-800 bg-red-950/60 px-2.5 py-1.5 text-[11px] font-bold text-red-300 transition-all hover:bg-red-900"
+                        onClick={() => setCompanyScope('mie')}
+                        className={`cursor-pointer px-3 py-1.5 text-xs ${
+                          companyScope === 'mie'
+                            ? 'bg-[#111E42] font-semibold text-white'
+                            : 'font-medium text-[#8A94A8] hover:text-white'
+                        }`}
                       >
-                        Elimina
+                        Le mie aziende
                       </button>
-
                       <button
                         type="button"
-                        onClick={() => router.push(`/questionari-master?id=${q.id}`)}
-                        className="cursor-pointer rounded-md bg-[#FF5500] px-3.5 py-1.5 text-xs font-bold text-white transition-all hover:bg-orange-600"
+                        onClick={() => setCompanyScope('tutte')}
+                        className={`cursor-pointer px-3 py-1.5 text-xs ${
+                          companyScope === 'tutte'
+                            ? 'bg-[#111E42] font-semibold text-white'
+                            : 'font-medium text-[#8A94A8] hover:text-white'
+                        }`}
                       >
-                        Apri / Modifica →
+                        Tutte
                       </button>
                     </div>
                   </div>
-                );
-              })}
+
+                  <label
+                    htmlFor="cerca-azienda-cruscotto"
+                    className="mb-1.5 block text-[11px] font-semibold uppercase tracking-widest text-[#8A94A8]"
+                  >
+                    CERCA
+                  </label>
+                  <input
+                    id="cerca-azienda-cruscotto"
+                    type="search"
+                    value={companySearch}
+                    onChange={(e) => setCompanySearch(e.target.value)}
+                    placeholder="Cerca azienda attiva, codice AZ, referente..."
+                    className="mb-4 w-full rounded-[9px] border border-[#2A3A66] bg-[#090D16] px-3.5 py-2.5 text-sm text-[#E6EAF2] placeholder:text-[#5B6680] focus:border-[#FF5500] focus:outline-none"
+                  />
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full border-collapse text-[13px]">
+                      <thead>
+                        <tr className="text-left text-[11px] font-semibold uppercase tracking-widest text-[#8A94A8]">
+                          <th className="border-b border-[#1B2540] px-2 py-2.5">AZIENDA</th>
+                          <th className="border-b border-[#1B2540] px-2 py-2.5">STATO</th>
+                          <th className="border-b border-[#1B2540] px-2 py-2.5 text-right">VALORE</th>
+                          <th className="border-b border-[#1B2540] px-2 py-2.5 text-right">
+                            <span className="sr-only">Azioni</span>
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {workingCompanies.map((c) => {
+                          const inWork = c.operationalStatus === 'IN_LAVORAZIONE';
+                          return (
+                            <tr key={c.id} className="hover:bg-[#111E42]/30">
+                              <td className="border-b border-[#151F38] px-2 py-3">
+                                <div className="font-semibold text-white">{c.name}</div>
+                                <div className="text-[11px] text-[#8A94A8]">
+                                  {c.code} · {c.subtitleNote}
+                                </div>
+                              </td>
+                              <td className="border-b border-[#151F38] px-2 py-3">
+                                <span
+                                  className={`rounded-md border px-2 py-1 text-[10px] font-bold tracking-wider ${
+                                    inWork
+                                      ? 'border-emerald-500/35 bg-emerald-500/15 text-emerald-400'
+                                      : 'border-amber-500/35 bg-amber-500/15 text-amber-400'
+                                  }`}
+                                >
+                                  {inWork ? 'IN LAVORAZIONE' : 'FOLLOW-UP'}
+                                </span>
+                              </td>
+                              <td className="border-b border-[#151F38] px-2 py-3 text-right font-semibold text-white">
+                                {eur.format(c.displayValue)}
+                              </td>
+                              <td className="border-b border-[#151F38] px-2 py-3 text-right">
+                                <button
+                                  type="button"
+                                  onClick={() => router.push(`/aziende/${c.id}`)}
+                                  className="cursor-pointer rounded-md border border-[#2A3A66] bg-[#1B2540] px-2.5 py-1.5 text-[11px] font-semibold text-[#E6EAF2] hover:bg-[#25335A]"
+                                >
+                                  DETTAGLI
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+
+                        {workingCompanies.length === 0 && (
+                          <tr>
+                            <td colSpan={4} className="py-8 text-center text-sm text-[#8A94A8]">
+                              Nessuna azienda attiva trovata con i filtri attuali.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </section>
             </div>
           )}
-        </div>
-      )}
 
-      {activeTab === 'utenti' && (
-        <UsersTable currentUserRole={userRole} currentUserEmail={userName} />
+          {activeTab === 'trattative' && (
+            <RiepilogoKanbanDash
+              dati={localDeals}
+              userId={userId}
+              advisorName={userName}
+            />
+          )}
+
+          {activeTab === 'aziende' && (
+            <CompanyTable
+              companies={localCompanies}
+              title="CONTROLLO AZIENDE"
+              subtitle="Panoramica di tutte le aziende inserite nel database, advisor di riferimento e contratti attivi."
+              showRegisterButton={canCreateOrEditAziende}
+              onCompaniesDeleted={(deletedIds) => {
+                if (!canDeleteAziende) return;
+                const deletedSet = new Set(deletedIds);
+                setLocalCompanies((prev) => prev.filter((c) => !deletedSet.has(c.id)));
+              }}
+            />
+          )}
+
+          {activeTab === 'contatti' && <ContactsDirectoryView />}
+
+          {activeTab === 'offerte' && <CatalogDashboardView />}
+
+          {activeTab === 'fatture' && (
+            <InvoiceGeneratorView initialCompanies={localCompanies} />
+          )}
+
+          {activeTab === 'questionari' && (
+            <div className="space-y-6 rounded-2xl border border-[#1B2540] bg-[#0B132B] p-6 shadow-xl">
+              <div className="flex flex-col items-start justify-between gap-4 border-b border-[#1B2540] pb-4 md:flex-row md:items-center">
+                <div>
+                  <h3 className="text-base font-black uppercase tracking-wider text-white">
+                    Gallery Questionari Master Attivi / Creati
+                  </h3>
+                  <p className="mt-0.5 text-xs text-gray-400">
+                    Consulta i questionari disponibili o apri la pagina dedicata per crearne e lavorarne uno.
+                  </p>
+                </div>
+
+                {canEditQuestionari && (
+                  <button
+                    type="button"
+                    onClick={() => router.push('/questionari-master?mode=new')}
+                    className="cursor-pointer rounded-lg bg-[#FF5500] px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-white shadow transition-all hover:bg-orange-600"
+                  >
+                    + Aggiungi Questionario
+                  </button>
+                )}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setFilterCategoryId('all')}
+                  className={`cursor-pointer rounded-lg border px-3 py-1.5 text-xs font-bold transition-all ${
+                    filterCategoryId === 'all'
+                      ? 'border-orange-500 bg-[#FF5500] text-white'
+                      : 'border-[#2A3A66] bg-[#090D16] text-gray-400 hover:text-white'
+                  }`}
+                >
+                  Tutte le categorie ({masterQuestionnaires.length})
+                </button>
+                {categories.map((cat) => (
+                  <button
+                    key={cat.id}
+                    type="button"
+                    onClick={() => setFilterCategoryId(String(cat.id))}
+                    className={`cursor-pointer rounded-lg border px-3 py-1.5 text-xs font-bold transition-all ${
+                      String(filterCategoryId) === String(cat.id)
+                        ? 'border-orange-500 bg-[#FF5500] text-white'
+                        : 'border-[#2A3A66] bg-[#090D16] text-gray-400 hover:text-white'
+                    }`}
+                  >
+                    {cat.nome}
+                  </button>
+                ))}
+              </div>
+
+              {loadingQuestionnaires ? (
+                <div className="p-8 text-center font-mono text-xs text-gray-400">
+                  Caricamento gallery questionari...
+                </div>
+              ) : filteredQuestionnaires.length === 0 ? (
+                <div className="space-y-3 rounded-xl border border-dashed border-[#2A3A66] bg-[#090D16] p-12 text-center">
+                  <p className="text-sm text-gray-400">
+                    Nessun questionario master trovato per il filtro selezionato.
+                  </p>
+                  {canEditQuestionari && (
+                    <button
+                      type="button"
+                      onClick={() => router.push('/questionari-master?mode=new')}
+                      className="cursor-pointer rounded-lg bg-[#FF5500] px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-white shadow transition-all hover:bg-orange-600"
+                    >
+                      + Aggiungi il primo Questionario
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+                  {filteredQuestionnaires.map((q) => {
+                    const catName =
+                      categoryMap[String(q.categoria_id)] ||
+                      q.categoria_nome ||
+                      'Categoria non assegnata';
+                    return (
+                      <div
+                        key={q.id}
+                        className="flex flex-col justify-between space-y-4 rounded-xl border border-[#2A3A66] bg-[#111E42] p-5 shadow-md transition-all hover:border-slate-500"
+                      >
+                        <div className="space-y-2.5">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="rounded border border-slate-700 bg-[#090D16] px-2 py-0.5 font-mono text-[10px] font-bold uppercase text-[#FF5500]">
+                              {q.codice_modulo || 'QST'}
+                            </span>
+                            <span className="rounded border border-emerald-700 bg-emerald-950 px-2 py-0.5 text-[10px] font-semibold uppercase text-emerald-300">
+                              {q.stato || 'Attivo'}
+                            </span>
+                          </div>
+
+                          <div className="font-mono text-[11px] uppercase tracking-wide text-amber-300">
+                            Categoria: {catName}
+                          </div>
+
+                          <h4 className="text-sm font-bold uppercase text-white">{q.titolo}</h4>
+                          <p className="line-clamp-2 text-xs text-slate-300">
+                            {q.descrizione || 'Nessuna descrizione inserita.'}
+                          </p>
+                        </div>
+
+                        <div className="flex items-center justify-between gap-2 border-t border-[#1B2540] pt-3">
+                          {canDeleteQuestionari ? (
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteQuestionnaire(q.id)}
+                              className="cursor-pointer rounded-md border border-red-800 bg-red-950/60 px-2.5 py-1.5 text-[11px] font-bold text-red-300 transition-all hover:bg-red-900"
+                            >
+                              Elimina
+                            </button>
+                          ) : (
+                            <span />
+                          )}
+
+                          {canEditQuestionari && (
+                            <button
+                              type="button"
+                              onClick={() => router.push(`/questionari-master?id=${q.id}`)}
+                              className="cursor-pointer rounded-md bg-[#FF5500] px-3.5 py-1.5 text-xs font-bold text-white transition-all hover:bg-orange-600"
+                            >
+                              Apri / Modifica →
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'utenti' && (
+            <UsersTable currentUserRole={userRole} currentUserEmail={userName} />
+          )}
+        </>
       )}
     </div>
   );

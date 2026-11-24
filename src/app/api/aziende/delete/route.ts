@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { resolveGosPermissions } from '@/utils/gosPermissions';
 
 export async function POST(request: Request) {
   try {
@@ -36,6 +37,51 @@ export async function POST(request: Request) {
     const supabaseAdmin = createClient(supabaseUrl, serviceKey, {
       auth: { persistSession: false },
     });
+
+    const actorUserId: string | undefined = body?.actorUserId;
+    const actorEmail: string | undefined = body?.actorEmail;
+
+    if (actorUserId || actorEmail) {
+      let profileRow: Record<string, any> | null = null;
+
+      if (actorUserId) {
+        const { data: byId } = await supabaseAdmin
+          .from('gos_profiles')
+          .select('*')
+          .eq('id', actorUserId)
+          .maybeSingle();
+        profileRow = byId;
+      }
+
+      if (!profileRow && actorEmail) {
+        const { data: byEmail } = await supabaseAdmin
+          .from('gos_profiles')
+          .select('*')
+          .ilike('email', actorEmail.trim())
+          .maybeSingle();
+        profileRow = byEmail;
+      }
+
+      if (!profileRow) {
+        return NextResponse.json(
+          { error: 'Profilo utente non autorizzato per la cancellazione aziende.' },
+          { status: 403 }
+        );
+      }
+
+      const resolvedRole = profileRow.ruolo || profileRow.role || 'user Guest';
+      const perms = resolveGosPermissions({
+        ...profileRow,
+        ruolo: resolvedRole,
+      });
+
+      if (!perms.canDeleteAziende) {
+        return NextResponse.json(
+          { error: 'Permesso insufficiente per eliminare aziende (can_delete_aziende).' },
+          { status: 403 }
+        );
+      }
+    }
 
     const { data, error } = await supabaseAdmin
       .from('gos_aziende')

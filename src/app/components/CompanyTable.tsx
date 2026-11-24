@@ -116,6 +116,10 @@ export function CompanyTable({
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [deleteTargets, setDeleteTargets] = useState<CompanyItem[]>([]);
   const [deleting, setDeleting] = useState(false);
+  const [actorIdentity, setActorIdentity] = useState<{
+    userId?: string;
+    email?: string;
+  }>({});
   const [resolvedPerms, setResolvedPerms] = useState<GosUserPermissions>(() =>
     resolveGosPermissions(null)
   );
@@ -146,15 +150,23 @@ export function CompanyTable({
         } = await supabase.auth.getUser();
 
         if (!user) {
-          if (active) setResolvedPerms(resolveGosPermissions(null));
+          if (active) {
+            setActorIdentity({});
+            setResolvedPerms(resolveGosPermissions(null));
+          }
           return;
+        }
+
+        if (active) {
+          setActorIdentity({
+            userId: user.id,
+            email: user.email || undefined,
+          });
         }
 
         const { data: profile } = await supabase
           .from('gos_profiles')
-          .select(
-            'ruolo, can_delete_aziende, can_edit_offerte, can_delete_offerte, can_export_data'
-          )
+          .select('*')
           .eq('id', user.id)
           .maybeSingle();
 
@@ -185,17 +197,31 @@ export function CompanyTable({
     [resolvedPerms, permissions]
   );
 
+  const canWriteCompanies =
+    activePermissions.canEditAziende ||
+    Boolean(activePermissions.tabPermissions?.database_aziende?.edit);
+
+  const canDeleteCompanies =
+    activePermissions.canDeleteAziende ||
+    Boolean(activePermissions.tabPermissions?.database_aziende?.delete);
+
   useEffect(() => {
     setItems(companies);
     setSelectedIds((prev) => prev.filter((id) => companies.some((c) => c.id === id)));
   }, [companies]);
 
   useEffect(() => {
-    if (!activePermissions.canDeleteAziende) {
+    if (!canDeleteCompanies) {
       setSelectedIds([]);
       setDeleteTargets([]);
     }
-  }, [activePermissions.canDeleteAziende]);
+  }, [canDeleteCompanies]);
+
+  useEffect(() => {
+    if (!canWriteCompanies) {
+      setIsRegistering(false);
+    }
+  }, [canWriteCompanies]);
 
   const countsByStatus = useMemo(() => {
     const counts: Record<CompanyStatusModalita, number> = {
@@ -256,14 +282,14 @@ export function CompanyTable({
   };
 
   const toggleSelectOne = (id: string) => {
-    if (!activePermissions.canDeleteAziende) return;
+    if (!canDeleteCompanies) return;
     setSelectedIds((prev) =>
       prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
     );
   };
 
   const openBulkDeleteModal = () => {
-    if (!activePermissions.canDeleteAziende) return;
+    if (!canDeleteCompanies) return;
     const targets = items.filter((c) => selectedIds.includes(c.id));
     if (targets.length > 0) {
       setDeleteTargets(targets);
@@ -271,7 +297,7 @@ export function CompanyTable({
   };
 
   const handleConfirmDelete = async () => {
-    if (!activePermissions.canDeleteAziende || deleteTargets.length === 0) return;
+    if (!canDeleteCompanies || deleteTargets.length === 0) return;
     setDeleting(true);
 
     try {
@@ -290,7 +316,11 @@ export function CompanyTable({
       const response = await fetch('/api/aziende/delete', {
         method: 'POST',
         headers,
-        body: JSON.stringify({ ids: idsToDelete }),
+        body: JSON.stringify({
+          ids: idsToDelete,
+          actorUserId: actorIdentity.userId || session?.user?.id,
+          actorEmail: actorIdentity.email || session?.user?.email,
+        }),
       });
 
       const result = await response.json();
@@ -324,12 +354,12 @@ export function CompanyTable({
     }
   };
 
-  const canRegister = showRegisterButton && activePermissions.canCreateAziende;
-  const canImport = showImportButton && activePermissions.canCreateAziende;
+  const canRegister = showRegisterButton && canWriteCompanies;
+  const canImport = showImportButton && canWriteCompanies;
 
   return (
     <div className="space-y-6 rounded-2xl border border-[#1B2540] bg-[#0B132B] p-6 text-[#E6EAF2]">
-      {isRegistering && activePermissions.canCreateAziende ? (
+      {isRegistering && canWriteCompanies ? (
         <AnagraficaForm
           onSave={(newCompany) => {
             console.log('Azienda registrata in locale:', newCompany);
@@ -352,7 +382,7 @@ export function CompanyTable({
               <p className="mt-1 text-xs text-[#8A94A8]">{subtitle}</p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              {activePermissions.canDeleteAziende && selectedIds.length > 0 && (
+              {canDeleteCompanies && selectedIds.length > 0 && (
                 <button
                   type="button"
                   onClick={openBulkDeleteModal}
@@ -381,7 +411,6 @@ export function CompanyTable({
             </div>
           </div>
 
-          {/* Barra ricerca su singola riga come riferimento */}
           <div className="flex flex-col gap-3 border-b border-[#1B2540] pb-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex flex-1 items-center gap-4">
               <label
@@ -413,7 +442,6 @@ export function CompanyTable({
             </span>
           </div>
 
-          {/* Pulsanti salto stato */}
           <div className="flex flex-wrap items-center gap-2">
             {STATUS_SECTIONS.map((sec) => {
               const count = countsByStatus[sec.key];
@@ -473,7 +501,7 @@ export function CompanyTable({
                         <table className="w-full border-collapse text-left text-[13px] text-[#E6EAF2]">
                           <thead>
                             <tr className="border-b border-[#1B2540] text-[11px] font-semibold uppercase tracking-widest text-[#8A94A8]">
-                              {activePermissions.canDeleteAziende && (
+                              {canDeleteCompanies && (
                                 <th className="w-8 px-2 py-2.5">
                                   <input
                                     type="checkbox"
@@ -527,7 +555,7 @@ export function CompanyTable({
                                       : 'transition-colors hover:bg-[#111E42]/30'
                                   }
                                 >
-                                  {activePermissions.canDeleteAziende && (
+                                  {canDeleteCompanies && (
                                     <td className="px-2 py-3.5">
                                       <input
                                         type="checkbox"
@@ -575,7 +603,7 @@ export function CompanyTable({
                                       >
                                         DETTAGLI
                                       </Link>
-                                      {activePermissions.canDeleteAziende && (
+                                      {canDeleteCompanies && (
                                         <button
                                           type="button"
                                           onClick={() => setDeleteTargets([c])}
@@ -601,7 +629,7 @@ export function CompanyTable({
         </>
       )}
 
-      {activePermissions.canDeleteAziende && deleteTargets.length > 0 && (
+      {canDeleteCompanies && deleteTargets.length > 0 && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
           <div className="w-full max-w-md space-y-4 rounded-2xl border border-red-500/40 bg-[#0B132B] p-6 shadow-2xl">
             <div className="space-y-2">
