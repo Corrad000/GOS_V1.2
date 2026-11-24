@@ -1,11 +1,12 @@
 'use client';
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, FormEvent } from 'react';
 import Link from 'next/link';
 import { createBrowserClient } from '@supabase/ssr';
 import {
   AZIENDA_TAB_ITEMS,
   CRUSCOTTO_TAB_ITEMS,
+  GOS_ROLES,
   normalizeGosRole,
   resolveGosPermissions,
 } from '@/utils/gosPermissions';
@@ -73,6 +74,16 @@ export function UsersTable({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+
+  // Modale creazione nuovo utente
+  const [createOpen, setCreateOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [newFullName, setNewFullName] = useState('');
+  const [newEmail, setNewEmail] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [newRole, setNewRole] = useState<string>('Network Partner');
+  const [newStatus, setNewStatus] = useState<string>('ATTIVO');
 
   const [resettingId, setResettingId] = useState<string | null>(null);
   const [deleteTargets, setDeleteTargets] = useState<ProfileItem[]>([]);
@@ -196,6 +207,57 @@ export function UsersTable({
   useEffect(() => {
     markCurrentUserOnlineAndLoad();
   }, [markCurrentUserOnlineAndLoad]);
+
+  const handleCreateUser = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!isSuperAdmin) {
+      setCreateError('Solo i profili superadmin possono creare nuovi utenti.');
+      return;
+    }
+
+    setCreating(true);
+    setCreateError(null);
+
+    try {
+      const headers = await buildAuthHeaders();
+      const res = await fetch('/api/utenti/create', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          fullName: newFullName.trim(),
+          email: newEmail.trim(),
+          password: newPassword,
+          role: newRole,
+          stato: newStatus,
+          actorRole: effectiveRole,
+          actorUserId: actorInfo.userId,
+          actorEmail: actorInfo.email || currentUserEmail,
+        }),
+      });
+
+      const json = await res.json();
+      if (!res.ok) {
+        throw new Error(json?.error || 'Errore durante la creazione utente.');
+      }
+
+      if (json?.user) {
+        setProfiles((prev) => [json.user as ProfileItem, ...prev]);
+      } else {
+        await markCurrentUserOnlineAndLoad();
+      }
+
+      setNewFullName('');
+      setNewEmail('');
+      setNewPassword('');
+      setNewRole('Network Partner');
+      setNewStatus('ATTIVO');
+      setCreateOpen(false);
+    } catch (err: any) {
+      setCreateError(err?.message || 'Impossibile creare il nuovo utente.');
+    } finally {
+      setCreating(false);
+    }
+  };
 
   const getDisplayName = (p: ProfileItem) =>
     p.full_name || p.nome || p.email || 'Utente';
@@ -420,6 +482,23 @@ export function UsersTable({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {isSuperAdmin && (
+            <button
+              type="button"
+              onClick={() => {
+                setCreateError(null);
+                setCreateOpen(true);
+              }}
+              style={{
+                ...topActionStyle,
+                backgroundColor: '#f59e0b',
+                color: '#111827',
+              }}
+              className="hover:opacity-90 transition-all cursor-pointer"
+            >
+              + Nuovo Utente
+            </button>
+          )}
           {isSuperAdmin && selectedIds.length > 0 && (
             <button
               type="button"
@@ -661,6 +740,131 @@ export function UsersTable({
               })}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {createOpen && isSuperAdmin && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
+          <div className="bg-gray-900 border border-amber-500 rounded-none max-w-md w-full p-6 space-y-4 shadow-2xl">
+            <div className="space-y-1">
+              <div className="text-[11px] font-mono font-extrabold uppercase tracking-wider text-amber-400">
+                Gestione Utenti — Nuovo Profilo
+              </div>
+              <h3 className="text-base font-black text-white">
+                Crea Nuovo Utente
+              </h3>
+            </div>
+
+            <form onSubmit={handleCreateUser} className="space-y-3 text-xs">
+              <div>
+                <label className="block font-mono text-[10px] uppercase text-gray-400 mb-1">
+                  Nome Completo
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={newFullName}
+                  onChange={(e) => setNewFullName(e.target.value)}
+                  placeholder="Nome e Cognome"
+                  className="w-full bg-gray-950 border border-gray-700 rounded-none px-3 py-2 text-white focus:outline-none focus:border-amber-500"
+                />
+              </div>
+
+              <div>
+                <label className="block font-mono text-[10px] uppercase text-gray-400 mb-1">
+                  Email
+                </label>
+                <input
+                  type="email"
+                  required
+                  value={newEmail}
+                  onChange={(e) => setNewEmail(e.target.value)}
+                  placeholder="utente@glaring.world"
+                  className="w-full bg-gray-950 border border-gray-700 rounded-none px-3 py-2 text-white focus:outline-none focus:border-amber-500"
+                />
+              </div>
+
+              <div>
+                <label className="block font-mono text-[10px] uppercase text-gray-400 mb-1">
+                  Password Iniziale (min. 8 caratteri)
+                </label>
+                <input
+                  type="password"
+                  required
+                  minLength={8}
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full bg-gray-950 border border-gray-700 rounded-none px-3 py-2 text-white focus:outline-none focus:border-amber-500"
+                />
+              </div>
+
+              <div>
+                <label className="block font-mono text-[10px] uppercase text-gray-400 mb-1">
+                  Ruolo
+                </label>
+                <select
+                  value={newRole}
+                  onChange={(e) => setNewRole(e.target.value)}
+                  className="w-full bg-gray-950 border border-gray-700 rounded-none px-3 py-2 text-white focus:outline-none focus:border-amber-500"
+                >
+                  {GOS_ROLES.map((r) => (
+                    <option key={r} value={r}>
+                      {r}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block font-mono text-[10px] uppercase text-gray-400 mb-1">
+                  Stato
+                </label>
+                <select
+                  value={newStatus}
+                  onChange={(e) => setNewStatus(e.target.value)}
+                  className="w-full bg-gray-950 border border-gray-700 rounded-none px-3 py-2 text-white focus:outline-none focus:border-amber-500"
+                >
+                  <option value="ATTIVO">ATTIVO</option>
+                  <option value="SOSPESO">SOSPESO</option>
+                </select>
+              </div>
+
+              {createError && (
+                <div className="bg-red-950/60 border border-red-700 rounded-none p-2.5 text-red-300 font-semibold">
+                  {createError}
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-gray-800">
+                <button
+                  type="button"
+                  disabled={creating}
+                  onClick={() => setCreateOpen(false)}
+                  style={{
+                    ...topActionStyle,
+                    backgroundColor: '#1f2937',
+                    color: '#d1d5db',
+                  }}
+                  className="hover:opacity-90 cursor-pointer"
+                >
+                  Annulla
+                </button>
+                <button
+                  type="submit"
+                  disabled={creating}
+                  style={{
+                    ...topActionStyle,
+                    backgroundColor: '#f59e0b',
+                    color: '#111827',
+                  }}
+                  className="hover:opacity-90 disabled:opacity-50 cursor-pointer"
+                >
+                  {creating ? 'Creazione...' : 'Crea Utente'}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 
