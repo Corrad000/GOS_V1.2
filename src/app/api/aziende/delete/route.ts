@@ -4,7 +4,7 @@ import { resolveGosPermissions } from '@/utils/gosPermissions';
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
+    const body = await request.json().catch(() => ({}));
     const ids: string[] = Array.isArray(body?.ids) ? body.ids.filter(Boolean) : [];
 
     if (ids.length === 0) {
@@ -38,49 +38,93 @@ export async function POST(request: Request) {
       auth: { persistSession: false },
     });
 
-    const actorUserId: string | undefined = body?.actorUserId;
-    const actorEmail: string | undefined = body?.actorEmail;
+    const authHeader = request.headers.get('authorization') || '';
+    const bearerToken = authHeader.toLowerCase().startsWith('bearer ')
+      ? authHeader.slice(7).trim()
+      : '';
 
-    if (actorUserId || actorEmail) {
-      let profileRow: Record<string, any> | null = null;
+    let actorUserId: string | undefined =
+      typeof body?.actorUserId === 'string' && body.actorUserId.trim()
+        ? body.actorUserId.trim()
+        : undefined;
+    let actorEmail: string | undefined =
+      typeof body?.actorEmail === 'string' && body.actorEmail.trim()
+        ? body.actorEmail.trim()
+        : undefined;
 
-      if (actorUserId) {
-        const { data: byId } = await supabaseAdmin
-          .from('gos_profiles')
-          .select('*')
-          .eq('id', actorUserId)
-          .maybeSingle();
-        profileRow = byId;
-      }
-
-      if (!profileRow && actorEmail) {
-        const { data: byEmail } = await supabaseAdmin
-          .from('gos_profiles')
-          .select('*')
-          .ilike('email', actorEmail.trim())
-          .maybeSingle();
-        profileRow = byEmail;
-      }
-
-      if (!profileRow) {
+    if (bearerToken) {
+      const { data: authUserData, error: authErr } =
+        await supabaseAdmin.auth.getUser(bearerToken);
+      if (authErr || !authUserData?.user) {
         return NextResponse.json(
-          { error: 'Profilo utente non autorizzato per la cancellazione aziende.' },
-          { status: 403 }
+          { error: 'Token di autenticazione non valido o scaduto.' },
+          { status: 401 }
         );
       }
+      actorUserId = authUserData.user.id;
+      actorEmail = authUserData.user.email || actorEmail;
+    }
 
-      const resolvedRole = profileRow.ruolo || profileRow.role || 'user Guest';
-      const perms = resolveGosPermissions({
-        ...profileRow,
-        ruolo: resolvedRole,
-      });
+    if (!actorUserId && !actorEmail) {
+      return NextResponse.json(
+        { error: 'Autenticazione o identità operatore richiesta per eliminare aziende.' },
+        { status: 401 }
+      );
+    }
 
-      if (!perms.canDeleteAziende) {
-        return NextResponse.json(
-          { error: 'Permesso insufficiente per eliminare aziende (can_delete_aziende).' },
-          { status: 403 }
-        );
-      }
+    let profileRow: Record<string, any> | null = null;
+
+    if (actorUserId) {
+      const { data: byId } = await supabaseAdmin
+        .from('gos_profiles')
+        .select('*')
+        .eq('id', actorUserId)
+        .maybeSingle();
+      profileRow = byId;
+    }
+
+    if (!profileRow && actorEmail) {
+      const { data: byEmail } = await supabaseAdmin
+        .from('gos_profiles')
+        .select('*')
+        .ilike('email', actorEmail.trim())
+        .maybeSingle();
+      profileRow = byEmail;
+    }
+
+    if (!profileRow) {
+      return NextResponse.json(
+        { error: 'Profilo utente non autorizzato per la cancellazione aziende.' },
+        { status: 403 }
+      );
+    }
+
+    const statoProfilo = String(profileRow.stato || profileRow.status || 'ATTIVO')
+      .trim()
+      .toUpperCase();
+    if (statoProfilo === 'SOSPESO' || statoProfilo === 'DISATTIVO') {
+      return NextResponse.json(
+        { error: 'Profilo utente sospeso o non attivo.' },
+        { status: 403 }
+      );
+    }
+
+    const resolvedRole = profileRow.ruolo || profileRow.role || 'user Guest';
+    const perms = resolveGosPermissions({
+      ...profileRow,
+      ruolo: resolvedRole,
+    });
+
+    const canDelete =
+      Boolean(perms.canDeleteAziende) ||
+      Boolean(perms.tabPermissions?.database_aziende?.delete) ||
+      Boolean(perms.aziendaTabPermissions?.azienda_anagrafica?.delete);
+
+    if (!canDelete) {
+      return NextResponse.json(
+        { error: 'Permesso insufficiente per eliminare aziende (can_delete_aziende).' },
+        { status: 403 }
+      );
     }
 
     const { data, error } = await supabaseAdmin
