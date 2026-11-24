@@ -3,7 +3,13 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
-import { FinancialInputView, ProductItem, DynamicCostItem } from '@/modules/financial-engine/FinancialInputView';
+import {
+  FinancialInputView,
+  ProductItem,
+  DynamicCostItem,
+  CommissionItem,
+  BonusItem,
+} from '@/modules/financial-engine/FinancialInputView';
 import { KeyMetricsView, KpiRowData } from '@/modules/financial-engine/KeyMetricsView';
 import { ProfitAndLossView, PnLRowData } from '@/modules/financial-engine/ProfitAndLossView';
 import { CashFlowView, CashFlowRowData } from '@/modules/financial-engine/CashFlowView';
@@ -14,6 +20,17 @@ import { businessReportService } from '@/services/pdf/businessReportService';
 import { DocumentsView } from '@/modules/project-management/DocumentsView';
 
 type EntityStatus = 'Bozza' | 'Attivo' | 'Chiuso';
+type FiveYearTuple = [number, number, number, number, number];
+
+function toFiveYearTuple(arr: unknown[]): FiveYearTuple {
+  return [
+    Number(arr?.[0] ?? 0),
+    Number(arr?.[1] ?? 0),
+    Number(arr?.[2] ?? 0),
+    Number(arr?.[3] ?? 0),
+    Number(arr?.[4] ?? 0),
+  ];
+}
 
 function ProjectStatusSelect({ status, onChange }: { status: EntityStatus; onChange: (newStatus: EntityStatus) => void }) {
   const getBadgeStyle = (currentStatus: EntityStatus) => {
@@ -63,7 +80,6 @@ export default function ProjectDetailView() {
     codice_progetto: 'PRJ-001'
   });
 
-  // Stati condivisi del modello finanziario
   const [products, setProducts] = useState<ProductItem[]>([
     {
       name: 'Prodotto / Servizio Principale',
@@ -73,19 +89,26 @@ export default function ProjectDetailView() {
     }
   ]);
   const [generalProductionCosts, setGeneralProductionCosts] = useState<DynamicCostItem[]>([]);
+  const [staffCostsItems, setStaffCostsItems] = useState<DynamicCostItem[]>([]);
   const [capexItems, setCapexItems] = useState<DynamicCostItem[]>([
     { label: 'Impianti & Macchinari', amounts: [20000, 0, 10000, 0, 5000] }
   ]);
   const [opexItems, setOpexItems] = useState<DynamicCostItem[]>([
     { label: 'Spese Generali & Marketing', amounts: [10000, 10500, 11000, 11500, 12000] }
   ]);
+  const [commissionItems, setCommissionItems] = useState<CommissionItem[]>([]);
+  const [bonusItems, setBonusItems] = useState<BonusItem[]>([]);
+  const [capitalInjection, setCapitalInjection] = useState<FiveYearTuple>([0, 0, 0, 0, 0]);
+  const [dso, setDso] = useState<number>(30);
+  const [dio, setDio] = useState<number>(15);
+  const [dpo, setDpo] = useState<number>(30);
   const [otherOperatingExpenses, setOtherOperatingExpenses] = useState(0);
   const [depreciation, setDepreciation] = useState(10000);
   const [financialIncome, setFinancialIncome] = useState(0);
   const [financialExpenses, setFinancialExpenses] = useState(1500);
   const [corporateTaxRate, setCorporateTaxRate] = useState(24);
+  const [employeeTaxRate, setEmployeeTaxRate] = useState(30);
 
-  // Stati per il Debt Plan
   const [loans, setLoans] = useState<LoanItem[]>([
     {
       id: '1',
@@ -131,7 +154,6 @@ export default function ProjectDetailView() {
     loadProjectDetails();
   }, [projectId, supabase]);
 
-  // Motore di calcolo finanziario automatico
   const calculatedFinancials = useMemo(() => {
     const yearsCount = 5;
     const revenues = Array(yearsCount).fill(0);
@@ -155,45 +177,64 @@ export default function ProjectDetailView() {
       }
     });
 
+    (staffCostsItems || []).forEach((sc) => {
+      for (let i = 0; i < yearsCount; i++) {
+        operationalCosts[i] += Number(sc?.amounts?.[i] || 0);
+      }
+    });
+
     (opexItems || []).forEach((op) => {
       for (let i = 0; i < yearsCount; i++) {
         operationalCosts[i] += Number(op?.amounts?.[i] || 0);
       }
     });
 
-    const ebitda = revenues.map((rev, i) => rev - (cogs[i] + operationalCosts[i]));
+    const extraOpex = Number(otherOperatingExpenses || 0);
+    const totalOpex = operationalCosts.map((op) => op + extraOpex);
+
+    const ebitda = revenues.map((rev, i) => rev - (cogs[i] + totalOpex[i]));
     const ebit = ebitda.map((eb) => eb - Number(depreciation || 0));
     const ebt = ebit.map((eb) => eb + Number(financialIncome || 0) - Number(financialExpenses || 0));
     const taxes = ebt.map((eb) => (eb > 0 ? eb * (Number(corporateTaxRate || 24) / 100) : 0));
     const netIncome = ebt.map((eb, i) => eb - taxes[i]);
 
     const pnlRows: PnLRowData[] = [
-      { label: 'Valore della Produzione (Ricavi)', values: revenues },
-      { label: 'Costi Operativi (COGS)', values: cogs, isNegative: true },
-      { label: 'Costi Operativi (OPEX)', values: operationalCosts, isNegative: true },
-      { label: 'EBITDA', values: ebitda, isSubtotal: true },
-      { label: 'Ammortamenti', values: Array(yearsCount).fill(Number(depreciation || 0)), isNegative: true },
-      { label: 'EBIT', values: ebit, isSubtotal: true },
-      { label: 'Risultato Finanziario', values: Array(yearsCount).fill(Number(financialIncome || 0) - Number(financialExpenses || 0)) },
-      { label: 'Utile Ante Tasse (EBT)', values: ebt, isSubtotal: true },
-      { label: 'Imposte sul Reddito', values: taxes, isNegative: true },
-      { label: 'Utile Netto', values: netIncome, isSubtotal: true }
+      { label: 'Valore della Produzione (Ricavi)', values: toFiveYearTuple(revenues) },
+      { label: 'Costi Operativi (COGS)', values: toFiveYearTuple(cogs), isNegative: true },
+      { label: 'Costi Operativi (OPEX)', values: toFiveYearTuple(totalOpex), isNegative: true },
+      { label: 'EBITDA', values: toFiveYearTuple(ebitda), isSubtotal: true },
+      { label: 'Ammortamenti', values: toFiveYearTuple(Array(yearsCount).fill(Number(depreciation || 0))), isNegative: true },
+      { label: 'EBIT', values: toFiveYearTuple(ebit), isSubtotal: true },
+      { label: 'Risultato Finanziario', values: toFiveYearTuple(Array(yearsCount).fill(Number(financialIncome || 0) - Number(financialExpenses || 0))) },
+      { label: 'Utile Ante Tasse (EBT)', values: toFiveYearTuple(ebt), isSubtotal: true },
+      { label: 'Imposte sul Reddito', values: toFiveYearTuple(taxes), isNegative: true },
+      { label: 'Utile Netto', values: toFiveYearTuple(netIncome), isSubtotal: true }
     ];
 
     const ebitdaMargin = revenues.map((rev, i) => (rev > 0 ? (ebitda[i] / rev) * 100 : 0));
     const roi = revenues.map((rev, i) => (rev > 0 ? (netIncome[i] / rev) * 100 : 0));
 
     const kpiRows: KpiRowData[] = [
-      { label: 'EBITDA Margine', values: ebitdaMargin, isPercentage: true },
-      { label: 'ROI (Return on Investment)', values: roi, isPercentage: true }
+      { label: 'EBITDA Margine', values: toFiveYearTuple(ebitdaMargin), isPercentage: true },
+      { label: 'ROI (Return on Investment)', values: toFiveYearTuple(roi), isPercentage: true }
     ];
 
     const cashFlowRows: CashFlowRowData[] = [
-      { label: 'Flusso di Cassa Operativo', values: netIncome.map((ni) => ni + Number(depreciation || 0)), isSubtotal: true }
+      { label: 'Flusso di Cassa Operativo', values: toFiveYearTuple(netIncome.map((ni) => ni + Number(depreciation || 0))), isSubtotal: true }
     ];
 
     return { pnlRows, kpiRows, cashFlowRows };
-  }, [products, generalProductionCosts, opexItems, depreciation, financialIncome, financialExpenses, corporateTaxRate]);
+  }, [
+    products,
+    generalProductionCosts,
+    staffCostsItems,
+    opexItems,
+    otherOperatingExpenses,
+    depreciation,
+    financialIncome,
+    financialExpenses,
+    corporateTaxRate
+  ]);
 
   const handleStatusChange = async (newStatus: EntityStatus) => {
     setProjectData((prev: any) => ({ ...prev, stato: newStatus }));
@@ -266,15 +307,13 @@ export default function ProjectDetailView() {
     }
   };
 
-  if (!isMounted) {
+  if (!isMounted || loading) {
     return <main className="min-h-screen bg-gray-950 text-gray-100 p-10 font-mono text-xs">Caricamento area progetto...</main>;
   }
 
   return (
     <main className="min-h-screen bg-gray-950 text-gray-100 font-sans p-6 md:p-10 space-y-8">
       <div className="max-w-7xl mx-auto space-y-8">
-        
-        {/* INTESTAZIONE & AZIONI */}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-gray-800 pb-6">
           <div className="space-y-2">
             <div className="flex items-center gap-3">
@@ -293,7 +332,13 @@ export default function ProjectDetailView() {
           </div>
 
           <div className="flex items-center gap-3">
-        
+            <button
+              onClick={handleDownloadPDF}
+              disabled={generatingPdf}
+              className="px-4 py-2 bg-[#FF5500] hover:bg-orange-600 text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-md disabled:opacity-50"
+            >
+              {generatingPdf ? 'Generazione PDF...' : 'Report PDF'}
+            </button>
             <button
               onClick={() => router.back()}
               className="px-4 py-2 bg-gray-900 hover:bg-gray-800 border border-gray-800 text-xs font-semibold rounded-xl text-gray-300 transition-all cursor-pointer"
@@ -303,7 +348,6 @@ export default function ProjectDetailView() {
           </div>
         </div>
 
-        {/* BARRA DEI TAB */}
         <div className="flex flex-wrap gap-6 border-b border-gray-800 pb-4 text-sm font-semibold">
           <button
             onClick={() => setActiveTab('input')}
@@ -355,27 +399,40 @@ export default function ProjectDetailView() {
           </button>
         </div>
 
-        {/* CONTENUTO TAB */}
         {activeTab === 'input' && (
           <FinancialInputView
             products={products}
             setProducts={setProducts}
             generalProductionCosts={generalProductionCosts}
             setGeneralProductionCosts={setGeneralProductionCosts}
+            staffCostsItems={staffCostsItems}
+            setStaffCostsItems={setStaffCostsItems}
             capexItems={capexItems}
             setCapexItems={setCapexItems}
             opexItems={opexItems}
             setOpexItems={setOpexItems}
-            otherOperatingExpenses={otherOperatingExpenses}
-            setOtherOperatingExpenses={setOtherOperatingExpenses}
+            commissionItems={commissionItems}
+            setCommissionItems={setCommissionItems}
+            bonusItems={bonusItems}
+            setBonusItems={setBonusItems}
+            capitalInjection={capitalInjection}
+            setCapitalInjection={setCapitalInjection}
+            dso={dso}
+            setDso={setDso}
+            dio={dio}
+            setDio={setDio}
+            dpo={dpo}
+            setDpo={setDpo}
+            corporateTaxRate={corporateTaxRate}
+            setCorporateTaxRate={setCorporateTaxRate}
+            employeeTaxRate={employeeTaxRate}
+            setEmployeeTaxRate={setEmployeeTaxRate}
             depreciation={depreciation}
             setDepreciation={setDepreciation}
             financialIncome={financialIncome}
             setFinancialIncome={setFinancialIncome}
             financialExpenses={financialExpenses}
             setFinancialExpenses={setFinancialExpenses}
-            corporateTaxRate={corporateTaxRate}
-            setCorporateTaxRate={setCorporateTaxRate}
             onSave={handleSaveAll}
             saving={saving}
           />
@@ -416,7 +473,6 @@ export default function ProjectDetailView() {
             <DocumentsView projectId={projectId} />
           </div>
         )}
-
       </div>
     </main>
   );

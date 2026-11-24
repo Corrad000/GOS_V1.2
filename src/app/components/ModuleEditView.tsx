@@ -148,11 +148,11 @@ export function ModuleEditView({ modulo, onBack }: ModuleEditViewProps) {
       const { error } = await supabase
         .from('gos_domande')
         .delete()
-        .eq('id', domId);
+        .eq('id', domandaId);
 
       if (error) throw error;
 
-      setDomande(prev => prev.filter(d => d.id !== domId));
+      setDomande(prev => prev.filter(d => d.id !== domandaId));
     } catch (err: any) {
       alert('Errore durante l\'eliminazione: ' + (err.message || err));
     }

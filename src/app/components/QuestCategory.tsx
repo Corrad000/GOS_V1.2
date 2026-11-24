@@ -1,6 +1,6 @@
 'use client';
 
-import { Categoria } from '@/app/services/questionarioService';
+import { Categoria } from '@/services/questionnaireService';
 
 interface QuestCategoryProps {
   categories: Categoria[];

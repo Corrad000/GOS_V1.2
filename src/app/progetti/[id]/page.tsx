@@ -4,10 +4,10 @@ import { useState, useEffect, useMemo } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
 import { FinancialInputView, ProductItem, DynamicCostItem, CommissionItem, BonusItem } from '@/modules/financial-engine/FinancialInputView';
-import { KeyMetricsView } from '@/modules/financial-engine/KeyMetricsView';
+import { KeyMetricsView, KpiRowData } from '@/modules/financial-engine/KeyMetricsView';
 import { KpiGuideView } from '@/modules/financial-engine/KpiGuideView';
-import { ProfitAndLossView } from '@/modules/financial-engine/ProfitAndLossView';
-import { CashFlowView } from '@/modules/financial-engine/CashFlowView';
+import { ProfitAndLossView, PnLRowData } from '@/modules/financial-engine/ProfitAndLossView';
+import { CashFlowView, CashFlowRowData } from '@/modules/financial-engine/CashFlowView';
 import { DebtPlanView, LoanItem } from '@/modules/financial-engine/DebtPlanView';
 import { TaskScheduleView } from '@/modules/project-management/TaskScheduleView';
 import { KronosGanttView } from '@/modules/project-management/KronosGanttView';
@@ -19,6 +19,17 @@ import { businessReportService } from '@/services/pdf/businessReportService';
 import { calculateFinancials } from '@/modules/financial-engine/financialCalculations';
 
 type EntityStatus = 'Bozza' | 'Attivo' | 'Chiuso';
+type FiveYearTuple = [number, number, number, number, number];
+
+function toFiveYearTuple(arr: unknown[]): FiveYearTuple {
+  return [
+    Number(arr?.[0] ?? 0),
+    Number(arr?.[1] ?? 0),
+    Number(arr?.[2] ?? 0),
+    Number(arr?.[3] ?? 0),
+    Number(arr?.[4] ?? 0),
+  ];
+}
 
 function ProjectStatusSelect({ status, onChange }: { status: EntityStatus; onChange: (newStatus: EntityStatus) => void }) {
   const getBadgeStyle = (currentStatus: EntityStatus) => {
@@ -48,7 +59,7 @@ function ProjectStatusSelect({ status, onChange }: { status: EntityStatus; onCha
 
 interface BalanceSheetRowData {
   label: string;
-  values: [number, number, number, number, number];
+  values: FiveYearTuple;
   isSubtotal?: boolean;
 }
 
@@ -120,7 +131,7 @@ export default function ProjectDetailView() {
   const [commissionItems, setCommissionItems] = useState<CommissionItem[]>([]);
   const [bonusItems, setBonusItems] = useState<BonusItem[]>([]);
 
-  const [capitalInjection, setCapitalInjection] = useState<[number, number, number, number, number]>([5000000, 0, 0, 0, 0]);
+  const [capitalInjection, setCapitalInjection] = useState<FiveYearTuple>([5000000, 0, 0, 0, 0]);
   const [dso, setDso] = useState<number>(5);
   const [dio, setDio] = useState<number>(3);
   const [dpo, setDpo] = useState<number>(2);
@@ -180,7 +191,7 @@ export default function ProjectDetailView() {
           if (finData.opex_items) setOpexItems(finData.opex_items);
           if (finData.commission_items) setCommissionItems(finData.commission_items);
           if (finData.bonus_items) setBonusItems(finData.bonus_items);
-          if (finData.capital_injection) setCapitalInjection(finData.capital_injection);
+          if (finData.capital_injection) setCapitalInjection(toFiveYearTuple(finData.capital_injection));
           if (finData.dso !== undefined) setDso(finData.dso);
           if (finData.dio !== undefined) setDio(finData.dio);
           if (finData.dpo !== undefined) setDpo(finData.dpo);
@@ -205,7 +216,7 @@ export default function ProjectDetailView() {
   }, [projectId, supabase]);
 
   const calculatedFinancials = useMemo(() => {
-    return calculateFinancials({
+    const raw = calculateFinancials({
       products,
       generalProductionCosts,
       staffCostsItems,
@@ -224,6 +235,34 @@ export default function ProjectDetailView() {
       financialIncome,
       financialExpenses
     });
+
+    const pnlRows: PnLRowData[] = (raw.pnlRows || []).map((row: any) => ({
+      ...row,
+      values: toFiveYearTuple(row.values || []),
+    }));
+
+    const kpiRows: KpiRowData[] = (raw.kpiRows || []).map((row: any) => ({
+      ...row,
+      values: toFiveYearTuple(row.values || []),
+    }));
+
+    const cashFlowRows: CashFlowRowData[] = (raw.cashFlowRows || []).map((row: any) => ({
+      ...row,
+      values: toFiveYearTuple(row.values || []),
+    }));
+
+    const balanceSheetRows: BalanceSheetRowData[] = (raw.balanceSheetRows || []).map((row: any) => ({
+      ...row,
+      values: toFiveYearTuple(row.values || []),
+    }));
+
+    return {
+      ...raw,
+      pnlRows,
+      kpiRows,
+      cashFlowRows,
+      balanceSheetRows,
+    };
   }, [
     products,
     generalProductionCosts,
@@ -345,16 +384,9 @@ export default function ProjectDetailView() {
       setGeneratingPdf(true);
 
       const formatEuro = (v: number) => `€ ${Math.round(Number(v) || 0).toLocaleString('it-IT')}`;
-      const findRowValues = (rows: Array<{ label: string; values: number[] }>, matcher: (lbl: string) => boolean): [number, number, number, number, number] => {
+      const findRowValues = (rows: Array<{ label: string; values: number[] }>, matcher: (lbl: string) => boolean): FiveYearTuple => {
         const found = rows.find((r) => matcher((r.label || '').toLowerCase()));
-        const vals = found?.values || [0, 0, 0, 0, 0];
-        return [
-          Number(vals[0] || 0),
-          Number(vals[1] || 0),
-          Number(vals[2] || 0),
-          Number(vals[3] || 0),
-          Number(vals[4] || 0),
-        ];
+        return toFiveYearTuple(found?.values || []);
       };
 
       const pnlList = calculatedFinancials.pnlRows || [];
