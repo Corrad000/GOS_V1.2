@@ -57,7 +57,8 @@ function assert(condition, message) {
 function scanServiceRoleKeyUsage(dir) {
   const clientFindings = [];
   const serverFindings = [];
-  if (!fs.existsSync(dir)) return { clientFindings, serverFindings };
+  const anonFallbackFindings = [];
+  if (!fs.existsSync(dir)) return { clientFindings, serverFindings, anonFallbackFindings };
 
   const entries = fs.readdirSync(dir, { withFileTypes: true });
   for (const entry of entries) {
@@ -66,10 +67,12 @@ function scanServiceRoleKeyUsage(dir) {
       const sub = scanServiceRoleKeyUsage(fullPath);
       clientFindings.push(...sub.clientFindings);
       serverFindings.push(...sub.serverFindings);
+      anonFallbackFindings.push(...sub.anonFallbackFindings);
     } else if (/\.(ts|tsx|js|jsx|mjs)$/.test(entry.name)) {
       const text = fs.readFileSync(fullPath, 'utf8');
+      const rel = path.relative(process.cwd(), fullPath).replace(/\\/g, '/');
+
       if (text.includes('SUPABASE_SERVICE_ROLE_KEY')) {
-        const rel = path.relative(process.cwd(), fullPath).replace(/\\/g, '/');
         const isClientComponent =
           text.includes("'use client'") ||
           text.includes('"use client"') ||
@@ -80,42 +83,98 @@ function scanServiceRoleKeyUsage(dir) {
           serverFindings.push(rel);
         }
       }
+
+      if (
+        rel.startsWith('src/app/api/') &&
+        text.includes('SUPABASE_SERVICE_ROLE_KEY') &&
+        /(\|\||\?\?)\s*process\.env\.NEXT_PUBLIC_SUPABASE_ANON_KEY/.test(text)
+      ) {
+        anonFallbackFindings.push(rel);
+      }
     }
   }
-  return { clientFindings, serverFindings };
+  return { clientFindings, serverFindings, anonFallbackFindings };
+}
+
+async function checkUnauthenticatedRoute(routePath, method, payload, label) {
+  try {
+    const res = await fetch(`${BASE_URL}${routePath}`, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: payload ? JSON.stringify(payload) : undefined,
+    });
+
+    if (res.status === 404) {
+      console.log(`INFO  ${label} (${routePath}) non presente (HTTP 404)`);
+      return;
+    }
+
+    assert(
+      res.status === 401 || res.status === 403,
+      `${label} bloccato senza auth (ricevuto HTTP ${res.status})`
+    );
+  } catch (err) {
+    assert(false, `Errore chiamando ${BASE_URL}${routePath} (server attivo?): ${err.message}`);
+  }
+}
+
+async function checkLimitedUserRoute(routePath, method, payload, label) {
+  try {
+    const res = await fetch(`${BASE_URL}${routePath}`, {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${LIMITED_USER_TOKEN}`,
+      },
+      body: payload ? JSON.stringify(payload) : undefined,
+    });
+
+    if (res.status === 404) {
+      console.log(`INFO  ${label} (${routePath}) non presente (HTTP 404)`);
+      return;
+    }
+
+    assert(
+      res.status === 401 || res.status === 403,
+      `${label} bloccato per utente limitato (ricevuto HTTP ${res.status})`
+    );
+  } catch (err) {
+    assert(false, `Errore test utente limitato su ${BASE_URL}${routePath}: ${err.message}`);
+  }
 }
 
 async function runTests() {
   console.log(`\n=== GOS Security Smoke Test (${BASE_URL}) ===\n`);
 
-  const { clientFindings, serverFindings } = scanServiceRoleKeyUsage(
+  const { clientFindings, serverFindings, anonFallbackFindings } = scanServiceRoleKeyUsage(
     path.resolve(process.cwd(), 'src')
   );
+
   assert(
     clientFindings.length === 0,
     clientFindings.length === 0
       ? 'Nessun uso di SUPABASE_SERVICE_ROLE_KEY in componenti/moduli client'
       : `SUPABASE_SERVICE_ROLE_KEY trovata in codice client: ${clientFindings.join(', ')}`
   );
+
   if (serverFindings.length > 0) {
     console.log(
       `INFO  SUPABASE_SERVICE_ROLE_KEY rilevata solo in moduli server-side: ${serverFindings.join(', ')}`
     );
   }
 
-  try {
-    const res = await fetch(`${BASE_URL}/api/aziende/delete`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ids: [FAKE_ID] }),
-    });
-    assert(
-      res.status === 401 || res.status === 403,
-      `POST /api/aziende/delete senza auth bloccato (ricevuto HTTP ${res.status})`
+  if (anonFallbackFindings.length > 0) {
+    console.log(
+      `WARN  Route API con fallback su NEXT_PUBLIC_SUPABASE_ANON_KEY: ${anonFallbackFindings.join(', ')}`
     );
-  } catch (err) {
-    assert(false, `Errore chiamando /api/aziende/delete senza auth: ${err.message}`);
   }
+
+  await checkUnauthenticatedRoute(
+    '/api/aziende/delete',
+    'POST',
+    { ids: [FAKE_ID] },
+    'POST /api/aziende/delete senza auth'
+  );
 
   try {
     const res = await fetch(`${BASE_URL}/api/aziende/delete`, {
@@ -152,23 +211,45 @@ async function runTests() {
     assert(false, `Errore nel test PATCH /api/utenti/[id]: ${err.message}`);
   }
 
+  await checkUnauthenticatedRoute(
+    '/api/utenti/delete',
+    'POST',
+    { userId: FAKE_ID },
+    'POST /api/utenti/delete senza auth'
+  );
+
+  await checkUnauthenticatedRoute(
+    '/api/utenti/reset-password',
+    'POST',
+    { userId: FAKE_ID },
+    'POST /api/utenti/reset-password senza auth'
+  );
+
   if (LIMITED_USER_TOKEN) {
-    try {
-      const res = await fetch(`${BASE_URL}/api/aziende/delete`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${LIMITED_USER_TOKEN}`,
-        },
-        body: JSON.stringify({ ids: [FAKE_ID] }),
-      });
-      assert(
-        res.status === 401 || res.status === 403,
-        `Utente limitato bloccato su /api/aziende/delete (ricevuto HTTP ${res.status})`
-      );
-    } catch (err) {
-      assert(false, `Errore nel test utente limitato: ${err.message}`);
-    }
+    await checkLimitedUserRoute(
+      '/api/aziende/delete',
+      'POST',
+      { ids: [FAKE_ID] },
+      'POST /api/aziende/delete'
+    );
+    await checkLimitedUserRoute(
+      `/api/utenti/${FAKE_ID}`,
+      'PATCH',
+      { updates: { nome: 'Test' } },
+      'PATCH /api/utenti/[id]'
+    );
+    await checkLimitedUserRoute(
+      '/api/utenti/delete',
+      'POST',
+      { userId: FAKE_ID },
+      'POST /api/utenti/delete'
+    );
+    await checkLimitedUserRoute(
+      '/api/utenti/reset-password',
+      'POST',
+      { userId: FAKE_ID },
+      'POST /api/utenti/reset-password'
+    );
   } else {
     console.log('SKIP  TEST_LIMITED_USER_BEARER_TOKEN non impostato (opzionale per test ruolo limitato)');
   }
