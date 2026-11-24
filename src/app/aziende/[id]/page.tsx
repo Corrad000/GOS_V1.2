@@ -31,6 +31,7 @@ import {
   type GosContatto,
 } from '@/modules/contacts/contactsService';
 import { KybQuestionnaireView } from '@/modules/kyb/KybQuestionnaireView';
+import { KybCompanySummaryCard } from '@/modules/kyb/KybCompanySummaryCard';
 
 import { listInvoices, type GosInvoiceRecord } from '@/modules/invoices/invoiceService';
 
@@ -1150,6 +1151,11 @@ function CompanyPageContent() {
                     onCancel={() => setIsEditingAnagrafica(false)}
                   />
                 )}
+
+                <KybCompanySummaryCard
+                  companyCode={companyCode || resolvedCompanyId}
+                  aziendaId={resolvedCompanyId}
+                />
 
                 <div className="rounded-2xl border border-gray-800 bg-gray-900 p-6 space-y-4">
                   <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-800 pb-3">

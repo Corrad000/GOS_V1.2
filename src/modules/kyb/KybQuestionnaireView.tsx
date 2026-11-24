@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { printKybSubmissionPdf } from '@/services/pdf/kybPdfExport';
 import {
   listKybSubmissions,
   createKybSubmission,
@@ -278,6 +279,23 @@ export function KybQuestionnaireView({
     } else {
       alert('Errore durante il salvataggio del pacchetto KYB.');
     }
+  };
+
+  const handleGeneratePdf = () => {
+    if (!activeSub) return;
+    printKybSubmissionPdf({
+      ...activeSub,
+      azienda_id: activeSub.azienda_id || resolvedAziendaId,
+      company_code: activeSub.company_code || resolvedCompanyCode,
+      token: activeSub.token || clientToken || '',
+      stato,
+      anagrafica_dati: anagrafica,
+      societa_ubo_dati: societaUbo,
+      operativita_fondi_dati: operativitaFondi,
+      pacchetto_completo: pacchetto,
+      conformita_note: conformitaNote || null,
+      updated_at: new Date().toISOString(),
+    });
   };
 
   if (loading) {
@@ -1240,6 +1258,14 @@ export function KybQuestionnaireView({
           )}
 
           <div className="flex flex-wrap justify-end gap-3 border-t border-gray-800 pt-4">
+            <button
+              type="button"
+              onClick={handleGeneratePdf}
+              className="cursor-pointer rounded-xl border border-[#FF5500]/60 bg-[#FF5500]/15 px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-orange-200 transition hover:bg-[#FF5500]/25"
+            >
+              Genera PDF
+            </button>
+
             <button
               type="button"
               disabled={saving}

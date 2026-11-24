@@ -417,7 +417,10 @@ export async function saveKybSubmission(params: {
     const res = await fetch(`/api/kyb/${encodeURIComponent(String(params.token).trim())}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updatePayload),
+      body: JSON.stringify({
+        ...updatePayload,
+        markSubmitted: Boolean(params.markSubmitted),
+      }),
     });
     if (res.ok) {
       const json = await res.json();
