@@ -32,6 +32,17 @@ const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 const LIMITED_USER_TOKEN = process.env.TEST_LIMITED_USER_BEARER_TOKEN || '';
 const FAKE_ID = '00000000-0000-0000-0000-000000000000';
 
+const PROTECTED_TABLES = [
+  'gos_profiles',
+  'gos_aziende',
+  'gos_financial_data',
+  'company_files',
+  'gos_offerte',
+  'gos_trattative',
+  'projects',
+  'gos_kyb_submissions',
+];
+
 let failures = 0;
 
 function assert(condition, message) {
@@ -163,23 +174,32 @@ async function runTests() {
   }
 
   if (SUPABASE_URL && SUPABASE_ANON_KEY) {
-    try {
-      const res = await fetch(`${SUPABASE_URL}/rest/v1/gos_profiles?select=id,email,ruolo&limit=5`, {
-        headers: {
-          apikey: SUPABASE_ANON_KEY,
-          Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
-        },
-      });
-      if (res.ok) {
-        const rows = await res.json();
-        console.log(
-          `INFO  REST anon su gos_profiles ha restituito ${Array.isArray(rows) ? rows.length : 0} righe (verifica che sia 0 se RLS blocca anon)`
-        );
-      } else {
-        console.log(`INFO  REST anon su gos_profiles respinta con HTTP ${res.status}`);
+    for (const table of PROTECTED_TABLES) {
+      try {
+        const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?select=*&limit=5`, {
+          headers: {
+            apikey: SUPABASE_ANON_KEY,
+            Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+          },
+        });
+
+        if (res.status === 401 || res.status === 403) {
+          assert(true, `Lettura anon su ${table} bloccata (HTTP ${res.status})`);
+        } else if (res.ok) {
+          const rows = await res.json();
+          const count = Array.isArray(rows) ? rows.length : 0;
+          assert(
+            count === 0,
+            count === 0
+              ? `Lettura anon su ${table} ha restituito 0 righe`
+              : `Lettura anon su ${table} ha esposto ${count} righe`
+          );
+        } else {
+          console.log(`INFO  REST anon su ${table} ha risposto HTTP ${res.status}`);
+        }
+      } catch (err) {
+        console.log(`INFO  Verifica REST anon su ${table} non eseguita: ${err.message}`);
       }
-    } catch (err) {
-      console.log(`INFO  Verifica REST Supabase non eseguita: ${err.message}`);
     }
   }
 
