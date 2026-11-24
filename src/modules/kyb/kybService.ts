@@ -98,6 +98,7 @@ export interface KybPacchettoCompleto {
   domande_ricorrenti: KybDomandaRisposta[];
   modulo_kyc: KybModuloKycRif;
   dichiarazione_legale: KybDichiarazioneLegale;
+  counterparty_kyb?: Record<string, any>;
 }
 
 export interface GosKybSubmission {
@@ -308,6 +309,7 @@ export function hydratePacchettoCompleto(
       ...defaults.dichiarazione_legale,
       ...(raw?.dichiarazione_legale || {}),
     },
+    ...(raw?.counterparty_kyb ? { counterparty_kyb: raw.counterparty_kyb } : {}),
   };
 }
 
