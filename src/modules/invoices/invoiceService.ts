@@ -371,7 +371,7 @@ export async function listInvoiceAziendeOptions(
 export async function listInvoices(): Promise<GosInvoiceRecord[]> {
   try {
     const { data, error } = await supabase
-      .from('gos_fatture')
+      .from('gos_invoices')
       .select('*')
       .order('created_at', { ascending: false });
 
@@ -456,7 +456,7 @@ export async function saveInvoice(
   try {
     if (record.id) {
       const { data, error } = await supabase
-        .from('gos_fatture')
+        .from('gos_invoices')
         .update(payload)
         .eq('id', record.id)
         .select()
@@ -472,7 +472,7 @@ export async function saveInvoice(
       return { data: normalized, error: null };
     } else {
       const { data, error } = await supabase
-        .from('gos_fatture')
+        .from('gos_invoices')
         .insert([{ ...payload, created_at: nowIso }])
         .select()
         .single();
@@ -506,7 +506,7 @@ export async function updateInvoiceStatus(
 
   try {
     const { error } = await supabase
-      .from('gos_fatture')
+      .from('gos_invoices')
       .update({ status: cleanStatus, updated_at: nowIso })
       .eq('id', id);
 

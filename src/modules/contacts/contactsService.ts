@@ -17,7 +17,6 @@ export interface GosContatto {
   nome_completo: string;
   email: string | null;
   telefono: string | null;
-  paese: string | null;
   ruolo: string | null;
   origine: OrigineContatto | string;
   note: string | null;
@@ -31,11 +30,22 @@ export interface UpsertContattoInput {
   cognome?: string;
   email?: string | null;
   telefono?: string | null;
-  paese?: string | null;
   ruolo?: string | null;
   aziendaId?: string | null;
   aziendaNome?: string | null;
   origine?: OrigineContatto | string;
+  note?: string | null;
+}
+
+export interface UpdateContattoInput {
+  nome?: string;
+  cognome?: string | null;
+  email?: string | null;
+  telefono?: string | null;
+  ruolo?: string | null;
+  aziendaId?: string | null;
+  aziendaNome?: string | null;
+  origine?: OrigineContatto | string | null;
   note?: string | null;
 }
 
@@ -56,7 +66,7 @@ export async function listAziendeOptions(): Promise<
   Array<{ id: string; ragione_sociale: string }>
 > {
   const { data, error } = await supabase
-    .from('aziende')
+    .from('gos_aziende')
     .select('id, ragione_sociale')
     .order('ragione_sociale', { ascending: true });
 
@@ -96,7 +106,6 @@ export async function searchContatti(
           c.cognome,
           c.email,
           c.telefono,
-          c.paese,
           c.ruolo,
           c.azienda_nome,
         ]
@@ -124,7 +133,6 @@ export async function upsertContatto(
   const nomePulito = input.nome.trim();
   if (!nomePulito) return null;
 
-  const cleanPaese = input.paese !== undefined ? (input.paese ? input.paese.trim() : null) : undefined;
   const cleanAziendaNome =
     input.aziendaNome !== undefined
       ? (input.aziendaNome ? input.aziendaNome.trim() : null)
@@ -154,11 +162,10 @@ export async function upsertContatto(
   let saved = (data as GosContatto) || null;
   const targetId = saved?.id || input.id || null;
 
-  if (targetId && (cleanPaese !== undefined || cleanAziendaNome !== undefined || cleanAziendaId !== undefined)) {
+  if (targetId && (cleanAziendaNome !== undefined || cleanAziendaId !== undefined)) {
     const patch: Record<string, unknown> = {
       updated_at: new Date().toISOString(),
     };
-    if (cleanPaese !== undefined) patch.paese = cleanPaese;
     if (cleanAziendaNome !== undefined) patch.azienda_nome = cleanAziendaNome;
     if (cleanAziendaId !== undefined) patch.azienda_id = cleanAziendaId;
 
@@ -175,6 +182,145 @@ export async function upsertContatto(
   }
 
   return saved;
+}
+
+export async function updateContatto(
+  id: string,
+  input: UpdateContattoInput
+): Promise<{ data: GosContatto | null; error: string | null }> {
+  const cleanId = String(id || '').trim();
+  if (!cleanId) {
+    return { data: null, error: 'ID contatto mancante.' };
+  }
+
+  const patch: Record<string, unknown> = {
+    updated_at: new Date().toISOString(),
+  };
+
+  if (input.nome !== undefined) {
+    const trimmedNome = input.nome.trim();
+    if (!trimmedNome) {
+      return { data: null, error: 'Il nome del contatto è obbligatorio.' };
+    }
+    patch.nome = trimmedNome;
+  }
+
+  if (input.cognome !== undefined) {
+    patch.cognome = input.cognome ? input.cognome.trim() : '';
+  }
+
+  if (input.email !== undefined) {
+    patch.email = input.email ? input.email.trim().toLowerCase() : null;
+  }
+
+  if (input.telefono !== undefined) {
+    patch.telefono = input.telefono ? input.telefono.trim() : null;
+  }
+
+  if (input.ruolo !== undefined) {
+    patch.ruolo = input.ruolo ? input.ruolo.trim() : null;
+  }
+
+  if (input.aziendaId !== undefined) {
+    patch.azienda_id = input.aziendaId ? input.aziendaId.trim() : null;
+  }
+
+  if (input.aziendaNome !== undefined) {
+    patch.azienda_nome = input.aziendaNome ? input.aziendaNome.trim() : null;
+  }
+
+  if (input.origine !== undefined) {
+    patch.origine = input.origine ? String(input.origine).trim() : 'manuale';
+  }
+
+  if (input.note !== undefined) {
+    patch.note = input.note ? input.note.trim() : null;
+  }
+
+  const { data, error } = await supabase
+    .from('gos_contatti')
+    .update(patch)
+    .eq('id', cleanId)
+    .select('*')
+    .single();
+
+  if (error) {
+    console.error('Errore aggiornamento gos_contatti:', error.message || error);
+    return { data: null, error: error.message || 'Errore durante l’aggiornamento del contatto.' };
+  }
+
+  return { data: data as GosContatto, error: null };
+}
+
+export async function deleteContatto(
+  id: string
+): Promise<{ ok: boolean; error: string | null }> {
+  const cleanId = String(id || '').trim();
+  if (!cleanId) {
+    return { ok: false, error: 'ID contatto mancante.' };
+  }
+
+  const { data, error } = await supabase
+    .from('gos_contatti')
+    .delete()
+    .eq('id', cleanId)
+    .select('id');
+
+  if (error) {
+    console.error('Errore eliminazione contatto gos_contatti:', error.message || error);
+    return { ok: false, error: error.message || 'Errore durante l’eliminazione del contatto.' };
+  }
+
+  if (!Array.isArray(data) || data.length === 0) {
+    return {
+      ok: false,
+      error: 'Nessun contatto eliminato (verifica policy RLS DELETE su gos_contatti o ID).',
+    };
+  }
+
+  return { ok: true, error: null };
+}
+
+export async function deleteContatti(
+  ids: string[]
+): Promise<{ ok: boolean; deletedCount: number; error: string | null }> {
+  const cleanIds = Array.from(
+    new Set((ids || []).map((x) => String(x || '').trim()).filter(Boolean))
+  );
+
+  if (cleanIds.length === 0) {
+    return { ok: true, deletedCount: 0, error: null };
+  }
+
+  const { data, error } = await supabase
+    .from('gos_contatti')
+    .delete()
+    .in('id', cleanIds)
+    .select('id');
+
+  if (error) {
+    console.error('Errore eliminazione multipla gos_contatti:', error.message || error);
+    return {
+      ok: false,
+      deletedCount: 0,
+      error: error.message || 'Errore durante l’eliminazione dei contatti selezionati.',
+    };
+  }
+
+  const deletedCount = Array.isArray(data) ? data.length : 0;
+  if (deletedCount === 0) {
+    return {
+      ok: false,
+      deletedCount: 0,
+      error: 'Nessun contatto eliminato (verifica policy RLS DELETE su gos_contatti).',
+    };
+  }
+
+  return {
+    ok: true,
+    deletedCount,
+    error: null,
+  };
 }
 
 export async function listAllContatti(aziendaId?: string | null): Promise<GosContatto[]> {

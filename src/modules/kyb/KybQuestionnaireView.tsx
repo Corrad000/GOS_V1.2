@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   listKybSubmissions,
   createKybSubmission,
@@ -49,11 +49,48 @@ export function KybQuestionnaireView({
 }: KybQuestionnaireViewProps) {
   const resolvedAziendaId = aziendaId ?? companyId ?? null;
   const resolvedCompanyCode = (companyCode || resolvedAziendaId || 'KYB').trim();
-  const resolvedSeed: Parameters<typeof buildEmptyKybPayload>[0] = {
-    ...(companySeed || {}),
-    ragione_sociale:
-      companySeed?.ragione_sociale || companyName || ragioneSociale || '',
-  };
+
+  const seedRagioneSociale =
+    companySeed?.ragione_sociale || companyName || ragioneSociale || '';
+  const seedPartitaIva = companySeed?.partita_iva || '';
+  const seedCodiceFiscale = companySeed?.codice_fiscale || '';
+  const seedIndirizzo = companySeed?.indirizzo || '';
+  const seedCitta = companySeed?.citta || '';
+  const seedNazione = companySeed?.nazione || '';
+  const seedSitoWeb = companySeed?.sito_web || '';
+  const seedReferente = companySeed?.referente || '';
+  const seedEmail = companySeed?.email || '';
+  const seedTelefono = companySeed?.telefono || '';
+  const seedAdvisorNome = companySeed?.advisor_nome || '';
+
+  const resolvedSeed: NonNullable<Parameters<typeof buildEmptyKybPayload>[0]> = useMemo(
+    () => ({
+      ragione_sociale: seedRagioneSociale,
+      partita_iva: seedPartitaIva,
+      codice_fiscale: seedCodiceFiscale,
+      indirizzo: seedIndirizzo,
+      citta: seedCitta,
+      nazione: seedNazione,
+      sito_web: seedSitoWeb,
+      referente: seedReferente,
+      email: seedEmail,
+      telefono: seedTelefono,
+      advisor_nome: seedAdvisorNome,
+    }),
+    [
+      seedRagioneSociale,
+      seedPartitaIva,
+      seedCodiceFiscale,
+      seedIndirizzo,
+      seedCitta,
+      seedNazione,
+      seedSitoWeb,
+      seedReferente,
+      seedEmail,
+      seedTelefono,
+      seedAdvisorNome,
+    ]
+  );
 
   const [submissions, setSubmissions] = useState<GosKybSubmission[]>(
     initialSubmission ? [initialSubmission] : []
@@ -97,8 +134,15 @@ export function KybQuestionnaireView({
     initialSubmission?.conformita_note || ''
   );
 
+  const hydratedSubIdRef = useRef<string | null>(initialSubmission?.id || null);
+
   const hydrateFormFromSubmission = useCallback(
-    (sub: GosKybSubmission) => {
+    (sub: GosKybSubmission, force = false) => {
+      if (!force && hydratedSubIdRef.current === sub.id) {
+        setActiveSub(sub);
+        return;
+      }
+      hydratedSubIdRef.current = sub.id;
       const defaults = buildEmptyKybPayload(resolvedSeed);
       setActiveSub(sub);
       setNotFoundToken(false);
@@ -120,34 +164,46 @@ export function KybQuestionnaireView({
     [resolvedSeed]
   );
 
-  const loadSubmissions = useCallback(async () => {
-    if (clientMode && clientToken) {
+  useEffect(() => {
+    let cancelled = false;
+
+    const runLoad = async () => {
+      if (clientMode && clientToken) {
+        setLoading(true);
+        setNotFoundToken(false);
+        const found = await getKybSubmissionByToken(clientToken);
+        if (cancelled) return;
+        if (found) {
+          hydrateFormFromSubmission(found, true);
+        } else {
+          setActiveSub(null);
+          setNotFoundToken(true);
+        }
+        setLoading(false);
+        return;
+      }
+
+      if (initialSubmission) {
+        hydrateFormFromSubmission(initialSubmission, false);
+        setLoading(false);
+        return;
+      }
+
       setLoading(true);
-      setNotFoundToken(false);
-      const found = await getKybSubmissionByToken(clientToken);
-      if (found) {
-        hydrateFormFromSubmission(found);
-      } else {
-        setActiveSub(null);
-        setNotFoundToken(true);
+      const rows = await listKybSubmissions(resolvedCompanyCode, resolvedAziendaId);
+      if (cancelled) return;
+      setSubmissions(rows);
+      if (rows.length > 0) {
+        hydrateFormFromSubmission(rows[0], false);
       }
       setLoading(false);
-      return;
-    }
+    };
 
-    if (initialSubmission) {
-      hydrateFormFromSubmission(initialSubmission);
-      setLoading(false);
-      return;
-    }
+    void runLoad();
 
-    setLoading(true);
-    const rows = await listKybSubmissions(resolvedCompanyCode, resolvedAziendaId);
-    setSubmissions(rows);
-    if (rows.length > 0) {
-      hydrateFormFromSubmission(rows[0]);
-    }
-    setLoading(false);
+    return () => {
+      cancelled = true;
+    };
   }, [
     clientMode,
     clientToken,
@@ -156,10 +212,6 @@ export function KybQuestionnaireView({
     resolvedAziendaId,
     hydrateFormFromSubmission,
   ]);
-
-  useEffect(() => {
-    void loadSubmissions();
-  }, [loadSubmissions]);
 
   const handleCreateNewKyb = async () => {
     setCreating(true);
@@ -173,7 +225,7 @@ export function KybQuestionnaireView({
 
     if (created) {
       setSubmissions((prev) => [created, ...prev]);
-      hydrateFormFromSubmission(created);
+      hydrateFormFromSubmission(created, true);
       setActiveSection('profilo');
       setStatusMessage(
         'Nuovo pacchetto KYB creato. Compila le sezioni o copia il link per il cliente.'
@@ -216,7 +268,7 @@ export function KybQuestionnaireView({
     setSaving(false);
 
     if (updated) {
-      hydrateFormFromSubmission(updated);
+      hydrateFormFromSubmission(updated, true);
       setSubmissions((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
       setStatusMessage(
         markSubmitted
@@ -306,7 +358,7 @@ export function KybQuestionnaireView({
               <button
                 key={sub.id}
                 type="button"
-                onClick={() => hydrateFormFromSubmission(sub)}
+                onClick={() => hydrateFormFromSubmission(sub, true)}
                 className={`cursor-pointer rounded-xl border px-3 py-1.5 text-xs font-semibold transition ${
                   isSelected
                     ? 'border-[#FF5500] bg-[#FF5500]/15 text-white'
