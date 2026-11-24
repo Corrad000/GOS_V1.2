@@ -72,9 +72,7 @@ async function resolveAuthenticatedActor(
     return { error: 'Profilo operatore non trovato.', status: 403 as const };
   }
 
-  const stato = String(profile.stato || profile.status || 'ATTIVO')
-    .trim()
-    .toUpperCase();
+  const stato = String(profile.stato || 'ATTIVO').trim().toUpperCase();
   if (stato === 'SOSPESO' || stato === 'DISATTIVO') {
     return { error: 'Profilo operatore sospeso o disattivato.', status: 403 as const };
   }
@@ -101,9 +99,11 @@ export async function POST(request: Request) {
     const email = typeof body?.email === 'string' ? body.email.trim().toLowerCase() : '';
     const password = typeof body?.password === 'string' ? body.password : '';
     const fullName = typeof body?.fullName === 'string' ? body.fullName.trim() : '';
-    const companyName = typeof body?.companyName === 'string' ? body.companyName.trim() : '';
     const rawRole = typeof body?.role === 'string' ? body.role.trim() : 'Junior Associate';
-    const isAdmin = Boolean(body?.isAdmin);
+    const rawStato =
+      typeof body?.stato === 'string' && body.stato.trim()
+        ? body.stato.trim().toUpperCase()
+        : 'ATTIVO';
 
     if (!email || !email.includes('@')) {
       return NextResponse.json({ error: 'Email non valida.' }, { status: 400 });
@@ -116,14 +116,23 @@ export async function POST(request: Request) {
       );
     }
 
+    const nameParts = fullName.split(/\s+/).filter(Boolean);
+    const nome = nameParts[0] || email.split('@')[0];
+    const cognome = nameParts.length > 1 ? nameParts.slice(1).join(' ') : null;
+    const normalizedRole = normalizeGosRole(rawRole);
+    const isAdmin = normalizedRole === 'superadmin';
+
     const { data: createdAuth, error: createAuthError } =
       await adminClient.auth.admin.createUser({
         email,
         password,
         email_confirm: true,
         user_metadata: {
-          full_name: fullName || email,
+          full_name: fullName || nome,
+          nome,
+          cognome,
           role: rawRole,
+          ruolo: normalizedRole,
         },
       });
 
@@ -137,21 +146,22 @@ export async function POST(request: Request) {
     const newUserId = createdAuth.user.id;
     const codiceUtente = `USR-${Math.floor(10000 + Math.random() * 90000)}`;
 
-    const profilePayload: Record<string, unknown> = {
-      id: newUserId,
-      email,
-      full_text_name: fullName || email,
-      company_name: companyName || null,
-      role: rawRole,
-      ruolo: normalizeGosRole(rawRole),
-      is_admin: isAdmin,
-      stato: 'ATTIVO',
-      codice_utente: codiceUtente,
-    };
-
     const { data: upsertedProfile, error: profileUpsertError } = await adminClient
       .from('gos_profiles')
-      .upsert(profilePayload, { onConflict: 'id' })
+      .upsert(
+        {
+          id: newUserId,
+          email,
+          nome,
+          cognome,
+          role: rawRole,
+          ruolo: normalizedRole,
+          is_admin: isAdmin,
+          stato: rawStato,
+          codice_utente: codiceUtente,
+        },
+        { onConflict: 'id' }
+      )
       .select('*')
       .single();
 
