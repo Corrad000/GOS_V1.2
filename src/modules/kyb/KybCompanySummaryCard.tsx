@@ -6,7 +6,7 @@ import {
   buildKybClientLink,
   listKybSubmissions,
 } from '@/modules/kyb/kybService';
-import { printKybSubmissionPdf } from '@/service/pdf/kybPdfExport';
+import { printKybSubmissionPdf } from '@/services/pdf/kybPdfExport';
 
 interface KybCompanySummaryCardProps {
   companyCode: string;

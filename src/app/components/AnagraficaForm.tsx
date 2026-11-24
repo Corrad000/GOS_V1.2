@@ -1,17 +1,44 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { createClient } from '@supabase/supabase-js';
 
 // Client standard di Supabase per evitare problemi di cookie in locale
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
+const supabase =
+  supabaseUrl && supabaseAnonKey
+    ? createClient(supabaseUrl, supabaseAnonKey)
+    : null;
 
 interface AnagraficaFormProps {
-  initialData?: any; // Aggiunto per ricevere i dati dell'azienda corrente in modifica
+  initialData?: any;
   onSave: (company: any) => void;
   onCancel: () => void;
+}
+
+function describeError(err: unknown): string {
+  if (!err) return 'Errore non specificato';
+  if (typeof err === 'string') return err;
+  if (err instanceof Error) return err.message || err.name;
+  if (typeof err === 'object') {
+    const obj = err as Record<string, unknown>;
+    const parts: string[] = [];
+    for (const key of ['message', 'code', 'details', 'hint', 'status', 'statusText']) {
+      if (obj[key]) parts.push(`${key}: ${String(obj[key])}`);
+    }
+    if (parts.length > 0) return parts.join(' | ');
+    try {
+      const names = Object.getOwnPropertyNames(obj);
+      const extracted = names
+        .map((k) => `${k}=${String(obj[k])}`)
+        .filter((entry) => !entry.endsWith('=undefined'));
+      if (extracted.length > 0) return extracted.join(', ');
+    } catch {
+      // ignora errori di ispezione
+    }
+  }
+  return String(err);
 }
 
 export default function AnagraficaForm({ initialData, onSave, onCancel }: AnagraficaFormProps) {
@@ -27,44 +54,73 @@ export default function AnagraficaForm({ initialData, onSave, onCancel }: Anagra
   const [referente, setReferente] = useState(initialData?.referente || '');
   const [email, setEmail] = useState(initialData?.email || '');
   const [telefono, setTelefono] = useState(initialData?.telefono || '');
-  const [advisorNome, setAdvisorNome] = useState(initialData?.advisor_nome || 'Corrado Pinna (Administrator)');
-  const [fatturato, setFatturato] = useState(initialData?.fatturato !== undefined ? initialData.fatturato : 250000);
+  const [advisorNome, setAdvisorNome] = useState(
+    initialData?.advisor_nome || 'Corrado Pinna (Administrator)'
+  );
+  const [fatturato, setFatturato] = useState(
+    initialData?.fatturato !== undefined ? initialData.fatturato : 250000
+  );
   const [note, setNote] = useState(initialData?.note || '');
-  
+
   // Stato per la lista degli utenti/advisor presi da gos_profiles
   const [profiles, setProfiles] = useState<any[]>([]);
   const [loadingProfiles, setLoadingProfiles] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const hasInitialAdvisor = Boolean(initialData?.advisor_nome);
+  const appliedDefaultAdvisorRef = useRef(hasInitialAdvisor);
 
   // Caricamento dinamico dei profili / advisor da gos_profiles
   useEffect(() => {
+    let active = true;
+
     async function fetchProfiles() {
+      if (!supabase) {
+        return;
+      }
+
       setLoadingProfiles(true);
       try {
-        const { data, error } = await supabase
-          .from('gos_profiles')
-          .select('id, nome, email, role');
+        const { data, error } = await supabase.from('gos_profiles').select('*');
 
-        if (error) throw error;
-        if (data && data.length > 0) {
+        if (error) {
+          if (active) {
+            console.warn('Avviso recupero gos_profiles:', describeError(error));
+          }
+          return;
+        }
+
+        if (!active) return;
+
+        if (Array.isArray(data) && data.length > 0) {
           setProfiles(data);
-          // Seleziona di default il primo se non c'è già un advisor impostato e non siamo in modifica
-          if (!initialData && !advisorNome) {
-            const defaultAdvisor = `${data[0].nome || data[0].email} (${data[0].role || 'Advisor'})`;
-            setAdvisorNome(defaultAdvisor);
+          if (!appliedDefaultAdvisorRef.current) {
+            const first = data[0];
+            const label =
+              first.nome || first.full_name || first.name || first.email || 'Advisor';
+            const role = first.role || first.ruolo || 'Advisor';
+            setAdvisorNome(`${label} (${role})`);
+            appliedDefaultAdvisorRef.current = true;
           }
         }
-      } catch (err: any) {
-        console.error('Errore nel recupero dei profili da gos_profiles:', err);
+      } catch (err) {
+        if (active) {
+          console.warn('Avviso eccezione gos_profiles:', describeError(err));
+        }
       } finally {
-        setLoadingProfiles(false);
+        if (active) {
+          setLoadingProfiles(false);
+        }
       }
     }
 
-    fetchProfiles();
-  }, [initialData, advisorNome]);
+    void fetchProfiles();
+
+    return () => {
+      active = false;
+    };
+  }, [initialData]);
 
   const handleSaveDirect = async () => {
     if (!ragioneSociale.trim()) {
@@ -72,8 +128,8 @@ export default function AnagraficaForm({ initialData, onSave, onCancel }: Anagra
       return;
     }
 
-    if (!supabaseUrl || !supabaseAnonKey) {
-      alert('ERRORE: Variabili d\'ambiente Supabase non lette da Next.js!');
+    if (!supabase || !supabaseUrl || !supabaseAnonKey) {
+      alert("ERRORE: Variabili d'ambiente Supabase non lette da Next.js!");
       return;
     }
 
@@ -83,7 +139,8 @@ export default function AnagraficaForm({ initialData, onSave, onCancel }: Anagra
 
     const companyPayload = {
       ragione_sociale: ragioneSociale.trim(),
-      codice_azienda: initialData?.codice_azienda || `AZ-${Math.floor(Math.random() * 90000 + 10000)}`,
+      codice_azienda:
+        initialData?.codice_azienda || `AZ-${Math.floor(Math.random() * 90000 + 10000)}`,
       partita_iva: partitaIva,
       codice_fiscale: codiceFiscale,
       categoria: categoria,
@@ -99,13 +156,12 @@ export default function AnagraficaForm({ initialData, onSave, onCancel }: Anagra
       fatturato: Number(fatturato),
       contratti_attivi: initialData?.contratti_attivi ?? 3,
       note: note,
-      stato: initialData?.stato || 'ATTIVA'
+      stato: initialData?.stato || 'ATTIVA',
     };
 
     try {
       let resultData;
       if (initialData?.id) {
-        // Modalità UPDATE se l'azienda esiste già
         const { data, error } = await supabase
           .from('gos_aziende')
           .update(companyPayload)
@@ -116,7 +172,6 @@ export default function AnagraficaForm({ initialData, onSave, onCancel }: Anagra
         if (error) throw error;
         resultData = data;
       } else {
-        // Modalità INSERT se è una nuova azienda
         const { data, error } = await supabase
           .from('gos_aziende')
           .insert([companyPayload])
@@ -129,9 +184,9 @@ export default function AnagraficaForm({ initialData, onSave, onCancel }: Anagra
 
       console.log('SUCCESSO SALVATAGGIO:', resultData);
       onSave(resultData || companyPayload);
-    } catch (err: any) {
+    } catch (err) {
       console.error('ERRORE CATCH:', err);
-      const msg = err.message || JSON.stringify(err) || 'Errore sconosciuto';
+      const msg = describeError(err);
       setErrorMessage(msg);
       alert('ECCEZIONE: ' + msg);
     } finally {
@@ -141,7 +196,6 @@ export default function AnagraficaForm({ initialData, onSave, onCancel }: Anagra
 
   return (
     <div className="space-y-6 font-sans text-gray-100 bg-gray-950 p-4">
-      
       {errorMessage && (
         <div className="p-3 bg-red-950/85 border border-red-700 text-red-200 text-xs rounded-xl font-mono">
           <strong>Errore Rilevato:</strong> {errorMessage}
@@ -149,10 +203,10 @@ export default function AnagraficaForm({ initialData, onSave, onCancel }: Anagra
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5 text-xs">
-        
-        {/* Ragione Sociale */}
         <div className="space-y-1.5">
-          <label className="text-gray-300 font-medium uppercase tracking-wider text-[10px]">Ragione Sociale *</label>
+          <label className="text-gray-300 font-medium uppercase tracking-wider text-[10px]">
+            Ragione Sociale *
+          </label>
           <input
             type="text"
             value={ragioneSociale}
@@ -162,9 +216,10 @@ export default function AnagraficaForm({ initialData, onSave, onCancel }: Anagra
           />
         </div>
 
-        {/* Categoria / Settore */}
         <div className="space-y-1.5">
-          <label className="text-gray-300 font-medium uppercase tracking-wider text-[10px]">Categoria / Settore</label>
+          <label className="text-gray-300 font-medium uppercase tracking-wider text-[10px]">
+            Categoria / Settore
+          </label>
           <input
             type="text"
             value={categoria}
@@ -174,9 +229,10 @@ export default function AnagraficaForm({ initialData, onSave, onCancel }: Anagra
           />
         </div>
 
-        {/* Partita IVA / VAT */}
         <div className="space-y-1.5">
-          <label className="text-gray-300 font-medium uppercase tracking-wider text-[10px]">Partita IVA / VAT</label>
+          <label className="text-gray-300 font-medium uppercase tracking-wider text-[10px]">
+            Partita IVA / VAT
+          </label>
           <input
             type="text"
             value={partitaIva}
@@ -186,9 +242,10 @@ export default function AnagraficaForm({ initialData, onSave, onCancel }: Anagra
           />
         </div>
 
-        {/* Codice Fiscale */}
         <div className="space-y-1.5">
-          <label className="text-gray-300 font-medium uppercase tracking-wider text-[10px]">Codice Fiscale</label>
+          <label className="text-gray-300 font-medium uppercase tracking-wider text-[10px]">
+            Codice Fiscale
+          </label>
           <input
             type="text"
             value={codiceFiscale}
@@ -198,9 +255,10 @@ export default function AnagraficaForm({ initialData, onSave, onCancel }: Anagra
           />
         </div>
 
-        {/* Indirizzo Completo */}
         <div className="md:col-span-2 space-y-1.5">
-          <label className="text-gray-300 font-medium uppercase tracking-wider text-[10px]">Indirizzo Completo</label>
+          <label className="text-gray-300 font-medium uppercase tracking-wider text-[10px]">
+            Indirizzo Completo
+          </label>
           <input
             type="text"
             value={indirizzo}
@@ -210,9 +268,10 @@ export default function AnagraficaForm({ initialData, onSave, onCancel }: Anagra
           />
         </div>
 
-        {/* Codice Postale (CAP) */}
         <div className="space-y-1.5">
-          <label className="text-gray-300 font-medium uppercase tracking-wider text-[10px]">Codice Postale (CAP)</label>
+          <label className="text-gray-300 font-medium uppercase tracking-wider text-[10px]">
+            Codice Postale (CAP)
+          </label>
           <input
             type="text"
             value={cap}
@@ -222,9 +281,10 @@ export default function AnagraficaForm({ initialData, onSave, onCancel }: Anagra
           />
         </div>
 
-        {/* Città / Sede */}
         <div className="space-y-1.5">
-          <label className="text-gray-300 font-medium uppercase tracking-wider text-[10px]">Città / Sede</label>
+          <label className="text-gray-300 font-medium uppercase tracking-wider text-[10px]">
+            Città / Sede
+          </label>
           <input
             type="text"
             value={citta}
@@ -234,9 +294,10 @@ export default function AnagraficaForm({ initialData, onSave, onCancel }: Anagra
           />
         </div>
 
-        {/* Nazione */}
         <div className="space-y-1.5">
-          <label className="text-gray-300 font-medium uppercase tracking-wider text-[10px]">Nazione</label>
+          <label className="text-gray-300 font-medium uppercase tracking-wider text-[10px]">
+            Nazione
+          </label>
           <input
             type="text"
             value={nazione}
@@ -246,9 +307,10 @@ export default function AnagraficaForm({ initialData, onSave, onCancel }: Anagra
           />
         </div>
 
-        {/* Sito Web */}
         <div className="space-y-1.5">
-          <label className="text-gray-300 font-medium uppercase tracking-wider text-[10px]">Sito Web</label>
+          <label className="text-gray-300 font-medium uppercase tracking-wider text-[10px]">
+            Sito Web
+          </label>
           <input
             type="text"
             value={sitoWeb}
@@ -258,9 +320,10 @@ export default function AnagraficaForm({ initialData, onSave, onCancel }: Anagra
           />
         </div>
 
-        {/* Responsabile / Referente */}
         <div className="space-y-1.5">
-          <label className="text-gray-300 font-medium uppercase tracking-wider text-[10px]">Responsabile / Referente</label>
+          <label className="text-gray-300 font-medium uppercase tracking-wider text-[10px]">
+            Responsabile / Referente
+          </label>
           <input
             type="text"
             value={referente}
@@ -270,9 +333,10 @@ export default function AnagraficaForm({ initialData, onSave, onCancel }: Anagra
           />
         </div>
 
-        {/* E-mail di Contatto */}
         <div className="space-y-1.5">
-          <label className="text-gray-300 font-medium uppercase tracking-wider text-[10px]">E-mail di Contatto</label>
+          <label className="text-gray-300 font-medium uppercase tracking-wider text-[10px]">
+            E-mail di Contatto
+          </label>
           <input
             type="email"
             value={email}
@@ -282,9 +346,10 @@ export default function AnagraficaForm({ initialData, onSave, onCancel }: Anagra
           />
         </div>
 
-        {/* Telefono */}
         <div className="space-y-1.5">
-          <label className="text-gray-300 font-medium uppercase tracking-wider text-[10px]">Telefono</label>
+          <label className="text-gray-300 font-medium uppercase tracking-wider text-[10px]">
+            Telefono
+          </label>
           <input
             type="text"
             value={telefono}
@@ -294,26 +359,36 @@ export default function AnagraficaForm({ initialData, onSave, onCancel }: Anagra
           />
         </div>
 
-        {/* Assegna Advisor Responsabile (Dinamico da gos_profiles) */}
         <div className="space-y-1.5">
-          <label className="text-gray-300 font-medium uppercase tracking-wider text-[10px]">Assegna Advisor Responsabile</label>
+          <label className="text-gray-300 font-medium uppercase tracking-wider text-[10px]">
+            Assegna Advisor Responsabile
+          </label>
           <select
             value={advisorNome}
             onChange={(e) => setAdvisorNome(e.target.value)}
             className="w-full bg-gray-900 border border-gray-800 rounded-xl px-3.5 py-2.5 text-white focus:outline-none focus:border-amber-500 font-mono"
           >
-            {advisorNome && !profiles.some(p => `${p.nome || p.email} (${p.role || 'Advisor'})` === advisorNome) && (
-              <option value={advisorNome}>{advisorNome}</option>
-            )}
+            {advisorNome &&
+              !profiles.some((p) => {
+                const label =
+                  p.nome || p.full_name || p.name || p.email || 'Advisor';
+                const role = p.role || p.ruolo || 'Advisor';
+                return `${label} (${role})` === advisorNome;
+              }) && <option value={advisorNome}>{advisorNome}</option>}
             {loadingProfiles ? (
               <option value="">Caricamento advisor...</option>
             ) : profiles.length === 0 ? (
-              <option value="Corrado Pinna (Administrator)">Corrado Pinna (Administrator)</option>
+              <option value="Corrado Pinna (Administrator)">
+                Corrado Pinna (Administrator)
+              </option>
             ) : (
-              profiles.map((p) => {
-                const displayName = `${p.nome || p.email} (${p.role || 'Advisor'})`;
+              profiles.map((p, idx) => {
+                const label =
+                  p.nome || p.full_name || p.name || p.email || 'Advisor';
+                const role = p.role || p.ruolo || 'Advisor';
+                const displayName = `${label} (${role})`;
                 return (
-                  <option key={p.id} value={displayName}>
+                  <option key={p.id || idx} value={displayName}>
                     {displayName}
                   </option>
                 );
@@ -322,9 +397,10 @@ export default function AnagraficaForm({ initialData, onSave, onCancel }: Anagra
           </select>
         </div>
 
-        {/* Fatturato Stimato / Annuo (€) */}
         <div className="space-y-1.5">
-          <label className="text-gray-300 font-medium uppercase tracking-wider text-[10px]">Fatturato Stimato / Annuo (€)</label>
+          <label className="text-gray-300 font-medium uppercase tracking-wider text-[10px]">
+            Fatturato Stimato / Annuo (€)
+          </label>
           <input
             type="number"
             value={fatturato}
@@ -333,9 +409,10 @@ export default function AnagraficaForm({ initialData, onSave, onCancel }: Anagra
           />
         </div>
 
-        {/* Note Preliminari / Obiettivi Strategici */}
         <div className="md:col-span-2 space-y-1.5">
-          <label className="text-gray-300 font-medium uppercase tracking-wider text-[10px]">Note Preliminari / Obiettivi Strategici</label>
+          <label className="text-gray-300 font-medium uppercase tracking-wider text-[10px]">
+            Note Preliminari / Obiettivi Strategici
+          </label>
           <textarea
             rows={3}
             value={note}
@@ -344,10 +421,8 @@ export default function AnagraficaForm({ initialData, onSave, onCancel }: Anagra
             className="w-full bg-gray-900 border border-gray-800 rounded-xl p-3.5 text-white focus:outline-none focus:border-amber-500 font-mono resize-none"
           ></textarea>
         </div>
-
       </div>
 
-      {/* Pulsanti Azione */}
       <div className="flex justify-end gap-3 pt-4 border-t border-gray-800 items-center">
         {loading && (
           <span className="text-amber-400 font-mono text-xs animate-pulse">
@@ -368,7 +443,11 @@ export default function AnagraficaForm({ initialData, onSave, onCancel }: Anagra
           disabled={loading}
           className="px-6 py-2.5 bg-amber-600 hover:bg-amber-500 text-white rounded-xl font-bold shadow-lg transition-all cursor-pointer text-xs disabled:opacity-50"
         >
-          {loading ? 'SALVATAGGIO...' : (initialData ? 'SALVA MODIFICHE' : 'CONFERMA E REGISTRA AZIENDA')}
+          {loading
+            ? 'SALVATAGGIO...'
+            : initialData
+              ? 'SALVA MODIFICHE'
+              : 'CONFERMA E REGISTRA AZIENDA'}
         </button>
       </div>
     </div>
