@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
 import { createClient } from '@supabase/supabase-js';
+import { createServerClient } from '@supabase/ssr';
 import { normalizeGosRole } from '@/utils/gosPermissions';
 
 function getServerSupabaseClient() {
@@ -17,24 +19,45 @@ function getServerSupabaseClient() {
   });
 }
 
+async function getCookieSessionUser() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  if (!supabaseUrl || !anonKey) {
+    return null;
+  }
+
+  const cookieStore = await cookies();
+  const supabaseAuth = createServerClient(supabaseUrl, anonKey, {
+    cookies: {
+      getAll() {
+        return cookieStore.getAll();
+      },
+      setAll() {
+        // Route handler in sola lettura sessione
+      },
+    },
+  });
+
+  const { data, error } = await supabaseAuth.auth.getUser();
+  if (error || !data?.user) {
+    return null;
+  }
+
+  return data.user;
+}
+
 async function resolveActorProfile(
   supabaseServer: ReturnType<typeof getServerSupabaseClient>,
-  request: Request,
-  body?: Record<string, any>
+  request: Request
 ) {
   const authHeader = request.headers.get('authorization') || '';
   const bearerToken = authHeader.toLowerCase().startsWith('bearer ')
     ? authHeader.slice(7).trim()
     : '';
 
-  let actorUserId: string | undefined =
-    typeof body?.actorUserId === 'string' && body.actorUserId.trim()
-      ? body.actorUserId.trim()
-      : undefined;
-  let actorEmail: string | undefined =
-    typeof body?.actorEmail === 'string' && body.actorEmail.trim()
-      ? body.actorEmail.trim()
-      : undefined;
+  let actorUserId: string | undefined;
+  let actorEmail: string | undefined;
 
   if (bearerToken) {
     const { data: authData, error: authErr } =
@@ -43,7 +66,13 @@ async function resolveActorProfile(
       return { error: 'Token di autenticazione non valido o scaduto.', status: 401 as const };
     }
     actorUserId = authData.user.id;
-    actorEmail = authData.user.email || actorEmail;
+    actorEmail = authData.user.email || undefined;
+  } else {
+    const cookieUser = await getCookieSessionUser();
+    if (cookieUser) {
+      actorUserId = cookieUser.id;
+      actorEmail = cookieUser.email || undefined;
+    }
   }
 
   if (!actorUserId && !actorEmail) {
@@ -160,7 +189,7 @@ export async function PATCH(
     const body = await request.json().catch(() => ({}));
     const supabaseServer = getServerSupabaseClient();
 
-    const actor = await resolveActorProfile(supabaseServer, request, body);
+    const actor = await resolveActorProfile(supabaseServer, request);
     if ('error' in actor) {
       return NextResponse.json({ error: actor.error }, { status: actor.status });
     }
