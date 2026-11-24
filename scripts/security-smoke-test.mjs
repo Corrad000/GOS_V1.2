@@ -118,10 +118,27 @@ async function runTests() {
     });
     assert(
       res.status === 401 || res.status === 403,
-      `Tentativo spoofing actorUserId/actorEmail bloccato (ricevuto HTTP ${res.status})`
+      `Tentativo spoofing actorUserId/actorEmail su /api/aziende/delete bloccato (ricevuto HTTP ${res.status})`
     );
   } catch (err) {
-    assert(false, `Errore nel test spoofing: ${err.message}`);
+    assert(false, `Errore nel test spoofing aziende: ${err.message}`);
+  }
+
+  try {
+    const res = await fetch(`${BASE_URL}/api/utenti/${FAKE_ID}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        actorRole: 'superadmin',
+        updates: { ruolo: 'superadmin' },
+      }),
+    });
+    assert(
+      res.status === 401 || res.status === 403,
+      `Tentativo PATCH /api/utenti/[id] con actorRole finto bloccato (ricevuto HTTP ${res.status})`
+    );
+  } catch (err) {
+    assert(false, `Errore nel test PATCH /api/utenti/[id]: ${err.message}`);
   }
 
   if (LIMITED_USER_TOKEN) {

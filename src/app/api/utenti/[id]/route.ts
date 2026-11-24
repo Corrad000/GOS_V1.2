@@ -4,23 +4,88 @@ import { normalizeGosRole } from '@/utils/gosPermissions';
 
 function getServerSupabaseClient() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key =
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-  if (!supabaseUrl || !key) {
+  if (!supabaseUrl || !serviceKey) {
     throw new Error(
       'Configura NEXT_PUBLIC_SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY in .env.local.'
     );
   }
 
-  return createClient(supabaseUrl, key, {
+  return createClient(supabaseUrl, serviceKey, {
     auth: { persistSession: false },
   });
 }
 
+async function resolveActorProfile(
+  supabaseServer: ReturnType<typeof getServerSupabaseClient>,
+  request: Request,
+  body?: Record<string, any>
+) {
+  const authHeader = request.headers.get('authorization') || '';
+  const bearerToken = authHeader.toLowerCase().startsWith('bearer ')
+    ? authHeader.slice(7).trim()
+    : '';
+
+  let actorUserId: string | undefined =
+    typeof body?.actorUserId === 'string' && body.actorUserId.trim()
+      ? body.actorUserId.trim()
+      : undefined;
+  let actorEmail: string | undefined =
+    typeof body?.actorEmail === 'string' && body.actorEmail.trim()
+      ? body.actorEmail.trim()
+      : undefined;
+
+  if (bearerToken) {
+    const { data: authData, error: authErr } =
+      await supabaseServer.auth.getUser(bearerToken);
+    if (authErr || !authData?.user) {
+      return { error: 'Token di autenticazione non valido o scaduto.', status: 401 as const };
+    }
+    actorUserId = authData.user.id;
+    actorEmail = authData.user.email || actorEmail;
+  }
+
+  if (!actorUserId && !actorEmail) {
+    return { error: 'Autenticazione richiesta.', status: 401 as const };
+  }
+
+  let profile: Record<string, any> | null = null;
+  if (actorUserId) {
+    const { data: byId } = await supabaseServer
+      .from('gos_profiles')
+      .select('*')
+      .eq('id', actorUserId)
+      .maybeSingle();
+    profile = byId;
+  }
+
+  if (!profile && actorEmail) {
+    const { data: byEmail } = await supabaseServer
+      .from('gos_profiles')
+      .select('*')
+      .ilike('email', actorEmail.trim())
+      .maybeSingle();
+    profile = byEmail;
+  }
+
+  if (!profile) {
+    return { error: 'Profilo operatore non trovato o non autorizzato.', status: 403 as const };
+  }
+
+  const stato = String(profile.stato || profile.status || 'ATTIVO')
+    .trim()
+    .toUpperCase();
+  if (stato === 'SOSPESO' || stato === 'DISATTIVO') {
+    return { error: 'Profilo operatore sospeso o disattivato.', status: 403 as const };
+  }
+
+  const role = normalizeGosRole(String(profile.ruolo || profile.role || ''));
+  return { profile, role, status: 200 as const };
+}
+
 export async function GET(
-  _request: Request,
+  request: Request,
   context: { params: Promise<{ id: string }> }
 ) {
   try {
@@ -30,6 +95,19 @@ export async function GET(
     }
 
     const supabaseServer = getServerSupabaseClient();
+    const actor = await resolveActorProfile(supabaseServer, request);
+    if ('error' in actor) {
+      return NextResponse.json({ error: actor.error }, { status: actor.status });
+    }
+
+    const isSelf = String(actor.profile.id) === String(id);
+    if (actor.role !== 'superadmin' && !isSelf) {
+      return NextResponse.json(
+        { error: 'Non hai i permessi per leggere questo profilo.' },
+        { status: 403 }
+      );
+    }
+
     const { data, error } = await supabaseServer
       .from('gos_profiles')
       .select('*')
@@ -79,17 +157,21 @@ export async function PATCH(
 ) {
   try {
     const { id } = await context.params;
-    const body = await request.json();
-    const actorRole = normalizeGosRole(String(body?.actorRole || ''));
+    const body = await request.json().catch(() => ({}));
+    const supabaseServer = getServerSupabaseClient();
 
-    if (actorRole !== 'superadmin') {
+    const actor = await resolveActorProfile(supabaseServer, request, body);
+    if ('error' in actor) {
+      return NextResponse.json({ error: actor.error }, { status: actor.status });
+    }
+
+    if (actor.role !== 'superadmin') {
       return NextResponse.json(
         { error: 'Solo i profili superadmin possono modificare un profilo.' },
         { status: 403 }
       );
     }
 
-    const supabaseServer = getServerSupabaseClient();
     const { data: existing, error: readErr } = await supabaseServer
       .from('gos_profiles')
       .select('*')

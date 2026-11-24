@@ -6,6 +6,7 @@ import { createBrowserClient } from '@supabase/ssr';
 import {
   AZIENDA_TAB_ITEMS,
   CRUSCOTTO_TAB_ITEMS,
+  normalizeGosRole,
   resolveGosPermissions,
 } from '@/utils/gosPermissions';
 
@@ -63,6 +64,10 @@ export function UsersTable({
   currentUserEmail,
 }: UsersTableProps) {
   const [detectedRole, setDetectedRole] = useState<string>(currentUserRole);
+  const [actorInfo, setActorInfo] = useState<{
+    userId?: string;
+    email?: string;
+  }>({ email: currentUserEmail });
   const [profiles, setProfiles] = useState<ProfileItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -74,12 +79,13 @@ export function UsersTable({
   const [deleting, setDeleting] = useState(false);
 
   const effectiveRole = useMemo(() => {
-    if (detectedRole.toLowerCase() === 'superadmin') return 'superadmin';
-    if (currentUserRole.toLowerCase() === 'superadmin') return 'superadmin';
-    return detectedRole || currentUserRole;
+    const normDetected = normalizeGosRole(detectedRole);
+    const normProp = normalizeGosRole(currentUserRole);
+    if (normDetected === 'superadmin' || normProp === 'superadmin') return 'superadmin';
+    return normDetected || normProp || 'user Guest';
   }, [detectedRole, currentUserRole]);
 
-  const isSuperAdmin = effectiveRole.toLowerCase() === 'superadmin';
+  const isSuperAdmin = effectiveRole === 'superadmin';
 
   const supabase = useMemo(
     () =>
@@ -89,6 +95,23 @@ export function UsersTable({
       ),
     []
   );
+
+  const buildAuthHeaders = useCallback(async (): Promise<Record<string, string>> => {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (session?.access_token) {
+        headers.Authorization = `Bearer ${session.access_token}`;
+      }
+    } catch {
+      // ignora se la sessione non è disponibile
+    }
+    return headers;
+  }, [supabase]);
 
   const markCurrentUserOnlineAndLoad = useCallback(async () => {
     setLoading(true);
@@ -100,8 +123,12 @@ export function UsersTable({
       const list: ProfileItem[] = Array.isArray(data) ? data : [];
 
       let authEmail = currentUserEmail;
+      let authUserId: string | undefined;
       try {
         const { data: authData } = await supabase.auth.getUser();
+        if (authData?.user?.id) {
+          authUserId = authData.user.id;
+        }
         if (authData?.user?.email) {
           authEmail = authData.user.email;
         }
@@ -109,25 +136,35 @@ export function UsersTable({
         console.warn('Lettura sessione auth non disponibile:', authErr);
       }
 
-      if (authEmail) {
+      if (authEmail || authUserId) {
         const matchedProfile = list.find(
-          (p) => (p.email || '').toLowerCase() === authEmail!.toLowerCase()
+          (p) =>
+            (authUserId && String(p.id) === String(authUserId)) ||
+            (authEmail && (p.email || '').toLowerCase() === authEmail.toLowerCase())
         );
+
+        setActorInfo({
+          userId: matchedProfile?.id || authUserId,
+          email: matchedProfile?.email || authEmail,
+        });
+
         const matchedRole = matchedProfile?.role || matchedProfile?.ruolo;
         if (matchedRole) {
           setDetectedRole(matchedRole);
         }
 
-        try {
-          await supabase
-            .from('gos_profiles')
-            .update({
-              is_online: true,
-              last_seen_at: new Date().toISOString(),
-            })
-            .eq('email', authEmail);
-        } catch (presenceErr) {
-          console.warn('Aggiornamento presenza non riuscito:', presenceErr);
+        if (authEmail) {
+          try {
+            await supabase
+              .from('gos_profiles')
+              .update({
+                is_online: true,
+                last_seen_at: new Date().toISOString(),
+              })
+              .eq('email', authEmail);
+          } catch (presenceErr) {
+            console.warn('Aggiornamento presenza non riuscito:', presenceErr);
+          }
         }
       }
 
@@ -164,7 +201,7 @@ export function UsersTable({
     p.full_name || p.nome || p.email || 'Utente';
 
   const getRoleValue = (p: ProfileItem) =>
-    p.role || p.ruolo || 'user';
+    p.role || p.ruolo || 'user Guest';
 
   const getStatusValue = (p: ProfileItem) =>
     p.stato || p.status || 'ATTIVO';
@@ -261,12 +298,15 @@ export function UsersTable({
 
     setResettingId(profile.id);
     try {
+      const headers = await buildAuthHeaders();
       const res = await fetch('/api/utenti/reset-password', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           email: profile.email,
           actorRole: effectiveRole,
+          actorUserId: actorInfo.userId,
+          actorEmail: actorInfo.email || currentUserEmail,
         }),
       });
       const json = await res.json();
@@ -285,12 +325,15 @@ export function UsersTable({
 
     try {
       const idsToDelete = deleteTargets.map((t) => t.id);
+      const headers = await buildAuthHeaders();
       const res = await fetch('/api/utenti/delete', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           ids: idsToDelete,
           actorRole: effectiveRole,
+          actorUserId: actorInfo.userId,
+          actorEmail: actorInfo.email || currentUserEmail,
         }),
       });
       const json = await res.json();
@@ -408,7 +451,6 @@ export function UsersTable({
         </div>
       </div>
 
-      {/* Barra ricerca ad alto contrasto */}
       <div className="bg-gray-950 border border-gray-800 rounded-none p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="flex-1 flex items-center gap-2">
           <span
@@ -622,7 +664,6 @@ export function UsersTable({
         </div>
       )}
 
-      {/* ALERT DI CONFERMA ELIMINAZIONE IRREVERSIBILE */}
       {deleteTargets.length > 0 && isSuperAdmin && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
           <div className="bg-gray-900 border border-red-600 rounded-none max-w-md w-full p-6 space-y-4 shadow-2xl">
