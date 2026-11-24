@@ -30,7 +30,8 @@ import {
   splitNomeCognome,
   type GosContatto,
 } from '@/modules/contacts/contactsService';
-import { KybQuestionnaireView } from '@/app/kyb/KybQuestionnaireView';
+import { KybQuestionnaireView } from '@/modules/kyb/KybQuestionnaireView';
+
 import { listInvoices, type GosInvoiceRecord } from '@/modules/invoices/invoiceService';
 
 import { DocumentsView } from '@/modules/project-management/DocumentsView';

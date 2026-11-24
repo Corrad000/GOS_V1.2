@@ -1,5 +1,5 @@
 import React from 'react';
-import { KybQuestionnaireView } from '@/app/kyb/KybQuestionnaireView';
+import { KybQuestionnaireView } from '@/modules/kyb/KybQuestionnaireView';
 
 export const dynamic = 'force-dynamic';
 
