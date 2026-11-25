@@ -5,6 +5,10 @@ import { useState, useEffect, Suspense } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
 
+function isClientQuestionnaireTokenPath(pathname: string | null): boolean {
+  return /^\/questionari-master\/[^/]+/.test(pathname || '');
+}
+
 function NavigationHeader() {
   const router = useRouter();
   const pathname = usePathname();
@@ -21,7 +25,9 @@ function NavigationHeader() {
   );
 
   const isPublicClientRoute =
-    pathname?.startsWith('/share') || pathname?.startsWith('/kyb');
+    pathname?.startsWith('/share') ||
+    pathname?.startsWith('/kyb') ||
+    isClientQuestionnaireTokenPath(pathname);
 
   useEffect(() => {
     setMounted(true);
@@ -136,7 +142,9 @@ function NavigationHeader() {
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const isPublicClientRoute =
-    pathname?.startsWith('/share') || pathname?.startsWith('/kyb');
+    pathname?.startsWith('/share') ||
+    pathname?.startsWith('/kyb') ||
+    isClientQuestionnaireTokenPath(pathname);
 
   if (isPublicClientRoute) {
     return <>{children}</>;
