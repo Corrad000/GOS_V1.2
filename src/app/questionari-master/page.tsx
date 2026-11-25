@@ -33,6 +33,12 @@ function QuestionariMasterContent() {
   const [nuovaDomandaTesto, setNuovaDomandaTesto] = useState<string>('');
   const [nuovaDomandaTipo, setNuovaDomandaTipo] = useState<string>('rating_1_5');
 
+  // Modifica inline singola riga (domanda o intestazione)
+  const [editingDomandaId, setEditingDomandaId] = useState<string | null>(null);
+  const [editingDomandaTesto, setEditingDomandaTesto] = useState<string>('');
+  const [editingDomandaTipo, setEditingDomandaTipo] = useState<string>('rating_1_5');
+  const [savingDomanda, setSavingDomanda] = useState<boolean>(false);
+
   const [loading, setLoading] = useState<boolean>(true);
   const [saving, setSaving] = useState<boolean>(false);
   const [feedback, setFeedback] = useState<string>('');
@@ -69,7 +75,13 @@ function QuestionariMasterContent() {
             setDescrizione(modRow.descrizione || '');
             setStato(modRow.stato || 'Attivo');
             setCodiceModulo(modRow.codice_modulo || '');
-            setSelectedCategoryId(modRow.categoria_id ? String(modRow.categoria_id) : (catList[0]?.id ? String(catList[0].id) : ''));
+            setSelectedCategoryId(
+              modRow.categoria_id
+                ? String(modRow.categoria_id)
+                : catList[0]?.id
+                  ? String(catList[0].id)
+                  : ''
+            );
 
             const { data: domRows } = await supabase
               .from('gos_domande')
@@ -142,7 +154,7 @@ function QuestionariMasterContent() {
             categoria_id: selectedCategoryId,
             titolo: titolo.trim(),
             descrizione: descrizione.trim() || null,
-            stato
+            stato,
           })
           .eq('id', questionnaireId);
 
@@ -166,8 +178,8 @@ function QuestionariMasterContent() {
               titolo: titolo.trim(),
               descrizione: descrizione.trim() || 'Creato da pagina dedicata Questionari Master',
               stato,
-              versione: '1.0'
-            }
+              versione: '1.0',
+            },
           ])
           .select()
           .single();
@@ -175,17 +187,18 @@ function QuestionariMasterContent() {
         if (insErr) throw insErr;
 
         if (insertedMod) {
+          const isHeader = tipoRispostaIniziale === 'section_header';
           const { data: firstDom } = await supabase
             .from('gos_domande')
             .insert([
               {
                 modulo_id: insertedMod.id,
-                sezione: catObj?.nome || 'Generale',
+                sezione: isHeader ? domandaIniziale.trim() : catObj?.nome || 'Generale',
                 testo_domanda: domandaIniziale.trim(),
                 tipo_risposta: tipoRispostaIniziale,
-                peso: 1.0,
-                ordine: 1
-              }
+                peso: isHeader ? 0 : 1.0,
+                ordine: 1,
+              },
             ])
             .select()
             .single();
@@ -209,6 +222,9 @@ function QuestionariMasterContent() {
     if (!questionnaireId || !nuovaDomandaTesto.trim()) return;
 
     const catObj = categories.find((c) => String(c.id) === String(selectedCategoryId));
+    const isHeader = nuovaDomandaTipo === 'section_header';
+    const cleanText = nuovaDomandaTesto.trim();
+
     try {
       const nextOrder = domande.length + 1;
       const { data, error } = await supabase
@@ -216,12 +232,12 @@ function QuestionariMasterContent() {
         .insert([
           {
             modulo_id: questionnaireId,
-            sezione: catObj?.nome || 'Generale',
-            testo_domanda: nuovaDomandaTesto.trim(),
+            sezione: isHeader ? cleanText : catObj?.nome || 'Generale',
+            testo_domanda: cleanText,
             tipo_risposta: nuovaDomandaTipo,
-            peso: 1.0,
-            ordine: nextOrder
-          }
+            peso: isHeader ? 0 : 1.0,
+            ordine: nextOrder,
+          },
         ])
         .select()
         .single();
@@ -232,18 +248,81 @@ function QuestionariMasterContent() {
         setNuovaDomandaTesto('');
       }
     } catch (err: any) {
-      alert('Errore aggiunta domanda: ' + (err?.message || err));
+      alert('Errore aggiunta voce: ' + (err?.message || err));
+    }
+  };
+
+  const handleStartEditDomanda = (domanda: any) => {
+    setEditingDomandaId(domanda.id);
+    setEditingDomandaTesto(domanda.testo_domanda || '');
+    setEditingDomandaTipo(domanda.tipo_risposta || 'rating_1_5');
+  };
+
+  const handleCancelEditDomanda = () => {
+    setEditingDomandaId(null);
+    setEditingDomandaTesto('');
+    setEditingDomandaTipo('rating_1_5');
+  };
+
+  const handleSaveEditDomanda = async (domId: string) => {
+    const cleanText = editingDomandaTesto.trim();
+    if (!cleanText) {
+      alert('Il testo non può essere vuoto.');
+      return;
+    }
+
+    const isHeader = editingDomandaTipo === 'section_header';
+    setSavingDomanda(true);
+    try {
+      const updatePayload: Record<string, any> = {
+        testo_domanda: cleanText,
+        tipo_risposta: editingDomandaTipo,
+        peso: isHeader ? 0 : 1.0,
+      };
+      if (isHeader) {
+        updatePayload.sezione = cleanText;
+      }
+
+      const { data, error } = await supabase
+        .from('gos_domande')
+        .update(updatePayload)
+        .eq('id', domId)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      setDomande((prev) =>
+        prev.map((d) =>
+          d.id === domId
+            ? {
+                ...d,
+                ...(data || {}),
+                ...updatePayload,
+              }
+            : d
+        )
+      );
+      setEditingDomandaId(null);
+      setEditingDomandaTesto('');
+    } catch (err: any) {
+      alert('Errore modifica voce: ' + (err?.message || err));
+    } finally {
+      setSavingDomanda(false);
     }
   };
 
   const handleDeleteDomanda = async (domId: string) => {
-    if (!confirm('Eliminare questa domanda?')) return;
+    if (!confirm('Eliminare questa voce?')) return;
     try {
       const { error } = await supabase.from('gos_domande').delete().eq('id', domId);
       if (error) throw error;
+      if (editingDomandaId === domId) {
+        handleCancelEditDomanda();
+      }
       setDomande((prev) => prev.filter((d) => d.id !== domId));
     } catch (err: any) {
-      alert('Errore eliminazione domanda: ' + (err?.message || err));
+      alert('Errore eliminazione voce: ' + (err?.message || err));
     }
   };
 
@@ -261,7 +340,7 @@ function QuestionariMasterContent() {
               Lavorazione Questionari Master
             </h1>
             <p className="text-xs text-gray-400 mt-0.5">
-              Assegna la categoria, configura i metadati e gestisci le domande in un&apos;area dedicata.
+              Assegna la categoria, configura i metadati e gestisci intestazioni e domande in un&apos;area dedicata.
             </p>
           </div>
 
@@ -391,11 +470,11 @@ function QuestionariMasterContent() {
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2 border-t border-gray-800">
                   <div className="md:col-span-2">
                     <label className="block text-gray-300 mb-1 font-bold uppercase text-[11px] tracking-wider">
-                      Domanda Iniziale *
+                      Domanda o Intestazione Iniziale *
                     </label>
                     <input
                       type="text"
-                      placeholder="Es. Esiste un budget mensile aggiornato con rolling forecast?"
+                      placeholder="Es. Sezione 1 — Controllo di Gestione oppure una domanda..."
                       value={domandaIniziale}
                       onChange={(e) => setDomandaIniziale(e.target.value)}
                       required
@@ -416,6 +495,7 @@ function QuestionariMasterContent() {
                       <option value="text">Testo libero</option>
                       <option value="boolean">Sì / No (Booleana)</option>
                       <option value="choice">Selezione multipla</option>
+                      <option value="section_header">Intestazione</option>
                     </select>
                   </div>
                 </div>
@@ -449,7 +529,7 @@ function QuestionariMasterContent() {
               </div>
             </form>
 
-            {/* GESTIONE DOMANDE QUANDO SI LAVORA UN QUESTIONARIO ESISTENTE */}
+            {/* GESTIONE DOMANDE E INTESTAZIONI QUANDO SI LAVORA UN QUESTIONARIO ESISTENTE */}
             {questionnaireId && (
               <div className="bg-[#0B132B] border border-gray-800 p-6 rounded-none space-y-5 shadow-xl">
                 <div className="border-b border-gray-800 pb-3">
@@ -457,14 +537,18 @@ function QuestionariMasterContent() {
                     Domande del Questionario ({domande.length})
                   </h2>
                   <p className="text-xs text-gray-400 mt-0.5">
-                    Aggiungi o rimuovi domande associate a questo questionario master.
+                    Aggiungi intestazioni di sezione o domande, modificale o rimuovile dal questionario master.
                   </p>
                 </div>
 
                 <form onSubmit={handleAddDomanda} className="grid grid-cols-1 md:grid-cols-4 gap-3">
                   <input
                     type="text"
-                    placeholder="Scrivi una nuova domanda..."
+                    placeholder={
+                      nuovaDomandaTipo === 'section_header'
+                        ? 'Scrivi il titolo della nuova sezione...'
+                        : 'Scrivi una nuova domanda...'
+                    }
                     value={nuovaDomandaTesto}
                     onChange={(e) => setNuovaDomandaTesto(e.target.value)}
                     className="md:col-span-2 bg-gray-950 border border-gray-700 px-3.5 py-2 rounded-none text-white text-xs focus:outline-none focus:border-[#FF5500]"
@@ -479,12 +563,13 @@ function QuestionariMasterContent() {
                     <option value="text">Testo libero</option>
                     <option value="boolean">Sì / No</option>
                     <option value="choice">Selezione multipla</option>
+                    <option value="section_header">Intestazione</option>
                   </select>
                   <button
                     type="submit"
                     className="px-4 py-2 bg-[#FF5500] hover:bg-orange-600 text-white text-xs font-bold rounded-none cursor-pointer uppercase tracking-wider"
                   >
-                    + Aggiungi Domanda
+                    {nuovaDomandaTipo === 'section_header' ? '+ Aggiungi Intestazione' : '+ Aggiungi Domanda'}
                   </button>
                 </form>
 
@@ -494,26 +579,110 @@ function QuestionariMasterContent() {
                   </div>
                 ) : (
                   <div className="space-y-2">
-                    {domande.map((d, idx) => (
-                      <div
-                        key={d.id}
-                        className="bg-slate-800/90 border border-slate-600/80 p-3.5 flex items-center justify-between gap-4"
-                      >
-                        <div className="space-y-0.5">
-                          <div className="text-[10px] font-mono text-[#FF5500] uppercase font-bold">
-                            #{idx + 1} • {d.tipo_risposta}
-                          </div>
-                          <div className="text-xs font-semibold text-white">{d.testo_domanda}</div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteDomanda(d.id)}
-                          className="px-2.5 py-1 bg-red-950/60 hover:bg-red-900 text-red-300 border border-red-800 text-[11px] font-bold rounded-none cursor-pointer"
+                    {domande.map((d, idx) => {
+                      const isEditing = editingDomandaId === d.id;
+                      const isHeader = d.tipo_risposta === 'section_header';
+
+                      return (
+                        <div
+                          key={d.id}
+                          className={
+                            isHeader
+                              ? 'bg-[#111827] border-l-4 border-l-[#FF5500] border border-gray-700 p-3.5 flex flex-col md:flex-row md:items-center justify-between gap-4'
+                              : 'bg-slate-800/90 border border-slate-600/80 p-3.5 flex flex-col md:flex-row md:items-center justify-between gap-4'
+                          }
                         >
-                          Elimina
-                        </button>
-                      </div>
-                    ))}
+                          <div className="flex-1 space-y-1">
+                            <div className="text-[10px] font-mono text-[#FF5500] uppercase font-bold">
+                              {isHeader
+                                ? `#${idx + 1} • INTESTAZIONE SEZIONE`
+                                : `#${idx + 1} • ${d.tipo_risposta}`}
+                            </div>
+
+                            {isEditing ? (
+                              <div className="flex flex-col sm:flex-row gap-2 pt-1">
+                                <input
+                                  type="text"
+                                  value={editingDomandaTesto}
+                                  onChange={(e) => setEditingDomandaTesto(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                      e.preventDefault();
+                                      void handleSaveEditDomanda(d.id);
+                                    }
+                                    if (e.key === 'Escape') {
+                                      handleCancelEditDomanda();
+                                    }
+                                  }}
+                                  autoFocus
+                                  className="flex-1 bg-gray-950 border border-[#FF5500] px-3 py-1.5 rounded-none text-white text-xs focus:outline-none"
+                                />
+                                <select
+                                  value={editingDomandaTipo}
+                                  onChange={(e) => setEditingDomandaTipo(e.target.value)}
+                                  className="bg-gray-950 border border-gray-700 px-2.5 py-1.5 rounded-none text-white text-xs focus:outline-none focus:border-[#FF5500]"
+                                >
+                                  <option value="rating_1_5">Valutazione (1-5)</option>
+                                  <option value="text">Testo libero</option>
+                                  <option value="boolean">Sì / No</option>
+                                  <option value="choice">Selezione multipla</option>
+                                  <option value="section_header">Intestazione</option>
+                                </select>
+                              </div>
+                            ) : (
+                              <div
+                                className={
+                                  isHeader
+                                    ? 'text-xs font-extrabold uppercase tracking-wider text-white'
+                                    : 'text-xs font-semibold text-white'
+                                }
+                              >
+                                {d.testo_domanda}
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-2 shrink-0">
+                            {isEditing ? (
+                              <>
+                                <button
+                                  type="button"
+                                  disabled={savingDomanda}
+                                  onClick={() => void handleSaveEditDomanda(d.id)}
+                                  className="px-2.5 py-1 bg-[#FF5500] hover:bg-orange-600 text-white text-[11px] font-bold rounded-none cursor-pointer disabled:opacity-50"
+                                >
+                                  {savingDomanda ? 'Salvataggio...' : 'Salva'}
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={savingDomanda}
+                                  onClick={handleCancelEditDomanda}
+                                  className="px-2.5 py-1 bg-gray-950 hover:bg-gray-900 text-gray-300 border border-gray-700 text-[11px] font-bold rounded-none cursor-pointer disabled:opacity-50"
+                                >
+                                  Annulla
+                                </button>
+                              </>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => handleStartEditDomanda(d)}
+                                className="px-2.5 py-1 bg-amber-950/60 hover:bg-amber-900 text-amber-200 border border-amber-700 text-[11px] font-bold rounded-none cursor-pointer"
+                              >
+                                Modifica
+                              </button>
+                            )}
+
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteDomanda(d.id)}
+                              className="px-2.5 py-1 bg-red-950/60 hover:bg-red-900 text-red-300 border border-red-800 text-[11px] font-bold rounded-none cursor-pointer"
+                            >
+                              Elimina
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
