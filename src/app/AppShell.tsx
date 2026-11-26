@@ -10,7 +10,8 @@ function isPublicClientPath(pathname: string | null): boolean {
   return (
     pathname.startsWith('/share') ||
     pathname.startsWith('/kyb') ||
-    pathname.startsWith('/questionari-master/')
+    pathname.startsWith('/questionari-master/') ||
+    pathname.startsWith('/public/')
   );
 }
 
