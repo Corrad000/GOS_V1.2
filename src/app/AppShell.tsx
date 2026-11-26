@@ -5,8 +5,13 @@ import { useState, useEffect, Suspense } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
 
-function isClientQuestionnaireTokenPath(pathname: string | null): boolean {
-  return /^\/questionari-master\/[^/]+/.test(pathname || '');
+function isPublicClientPath(pathname: string | null): boolean {
+  if (!pathname) return false;
+  return (
+    pathname.startsWith('/share') ||
+    pathname.startsWith('/kyb') ||
+    pathname.startsWith('/questionari-master/')
+  );
 }
 
 function NavigationHeader() {
@@ -24,10 +29,7 @@ function NavigationHeader() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
 
-  const isPublicClientRoute =
-    pathname?.startsWith('/share') ||
-    pathname?.startsWith('/kyb') ||
-    isClientQuestionnaireTokenPath(pathname);
+  const isPublicClientRoute = isPublicClientPath(pathname);
 
   useEffect(() => {
     setMounted(true);
@@ -141,10 +143,7 @@ function NavigationHeader() {
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const isPublicClientRoute =
-    pathname?.startsWith('/share') ||
-    pathname?.startsWith('/kyb') ||
-    isClientQuestionnaireTokenPath(pathname);
+  const isPublicClientRoute = isPublicClientPath(pathname);
 
   if (isPublicClientRoute) {
     return <>{children}</>;
